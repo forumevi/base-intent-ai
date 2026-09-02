@@ -4,7 +4,6 @@ export async function POST(req: Request) {
   try {
     const { prompt } = await req.json();
 
-    // Dinamik mock yanıt üreteci
     const isSwap = prompt.toLowerCase().includes('swap');
     const isBridge = prompt.toLowerCase().includes('bridge');
 
