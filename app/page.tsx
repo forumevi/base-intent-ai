@@ -34,7 +34,6 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center justify-between p-6">
-      {/* Header */}
       <header className="w-full max-w-4xl flex justify-between items-center py-4">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
@@ -52,7 +51,6 @@ export default function Home() {
         </button>
       </header>
 
-      {/* Main Container */}
       <div className="max-w-2xl w-full text-center my-auto">
         <div className="inline-block px-3 py-1 bg-blue-950/50 border border-blue-500/20 rounded-full text-blue-400 text-xs font-semibold mb-4">
           Autonomous On-Chain Intent Engine
@@ -65,7 +63,6 @@ export default function Home() {
           Translate natural language into structured, gas-optimized Base execution transactions in seconds.
         </p>
 
-        {/* Search Bar */}
         <div className="flex gap-2 mb-4 bg-zinc-900/90 p-2 border border-zinc-800 rounded-2xl shadow-xl">
           <input
             type="text"
@@ -90,7 +87,6 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Preset Prompts */}
         <div className="flex flex-wrap justify-center gap-2 mb-8">
           {samplePrompts.map((p, idx) => (
             <button
@@ -106,7 +102,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Execution Output */}
         {result && (
           <div className="text-left bg-zinc-900/80 border border-zinc-800/80 p-5 rounded-xl shadow-2xl backdrop-blur-sm">
             <div className="flex justify-between items-center mb-3">
@@ -120,7 +115,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Footer */}
       <footer className="text-xs text-zinc-600 py-4">
         Built for Base Creator Grant Program • Powered by BaseIntent AI
       </footer>
