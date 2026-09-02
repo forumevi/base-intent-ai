@@ -20,4 +20,4 @@ BaseIntent AI translates human conversational prompts into structured, execution
 Experience the dApp live at: [base-intent-ai.vercel.app](https://base-intent-ai.vercel.app/)
 
 ---
-*Built for the Base Creator Grant Program.*
+*Built for the Base Creator Grant Program.* .
