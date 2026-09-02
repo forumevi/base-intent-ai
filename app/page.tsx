@@ -99,7 +99,7 @@ export default function Home() {
       }
     } catch (err) {
       console.error(err);
-    } finally {
+    } fontally {
       setLoading(false);
     }
   };
@@ -114,23 +114,22 @@ export default function Home() {
         setTxStatus({ msg: "Awaiting signature in wallet..." });
         addLog("Generating On-Chain Calldata for Executing Agent Intent...");
 
-        // Hedef adresi kullanıcı cüzdanının kendisine veya testnet kontratına yönlendir
-        const targetAddress = walletAddress; // Kendi adresine 0x transferi yaparak zincir üstü Token Event'i üretir
+        const targetAddress = walletAddress;
         
         // ERC20 'transfer(address,uint256)' metod imzası: 0xa9059cbb
-        // Parametre 1: Alıcı adresi (padded to 32 bytes)
-        // Parametre 2: Miktar (1 Token / 1000000000000000000 wei)
         const paddedAddress = targetAddress.replace('0x', '').padStart(64, '0');
-        const paddedAmount = (1000000000000000000n).toString(16).padStart(64, '0'); // 1 Token
+        
+        // TS2737 hatasını önlemek için BigInt(...) fonksiyonu kullandık
+        const amountBigInt = BigInt("1000000000000000000"); 
+        const paddedAmount = amountBigInt.toString(16).padStart(64, '0');
         const erc20TransferCalldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
 
-        // Zincir üstünde 0.0001 ETH'lik gerçek Native Swap/Transfer işlemi fırlat
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
             from: walletAddress,
-            to: result?.executionBatch?.[0]?.targetContract || '0x4200000000000000000000000000000000000006', // Base Sepolia WETH Router
-            value: '0x38D7EA4C68000', // 0.0001 ETH (Gerçek ETH harcaması ve Swap hareketi için)
+            to: result?.executionBatch?.[0]?.targetContract || '0x4200000000000000000000000000000000000006',
+            value: '0x38D7EA4C68000', // 0.0001 ETH
             data: erc20TransferCalldata,
           }],
         });
