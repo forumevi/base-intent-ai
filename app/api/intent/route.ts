@@ -18,22 +18,22 @@ export async function POST(req: Request) {
       
       Respond STRICTLY in JSON format. Structure:
       {
-        "intentType": "SWAP",
+        "intentType": "SWAP" | "BRIDGE" | "BATCH_EXECUTION" | "UNKNOWN",
         "confidenceScore": 0.98,
         "riskAnalysis": {
-          "score": "LOW",
-          "warnings": ["Low slippage tolerance detected"]
+          "score": "LOW" | "MEDIUM" | "HIGH",
+          "warnings": string[]
         },
         "executionBatch": [
           {
-            "step": 1,
-            "action": "Approve USDC Spend on Base Router",
-            "targetContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            "estimatedGasUsd": "$0.002",
+            "step": number,
+            "action": "Action description",
+            "targetContract": "0x address",
+            "estimatedGasUsd": "$0.00x",
             "details": {}
           }
         ],
-        "simulationSummary": "Parsed intent successfully for Base Network."
+        "simulationSummary": "Clear summary of parsed intent for Base Network."
       }
     `;
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
+        model: "llama3-70b-8192",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: prompt }
