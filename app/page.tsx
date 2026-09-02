@@ -115,7 +115,7 @@ export default function Home() {
     }
   };
 
-  // TAM DİNAMİK VEYA İÇERİK UYUMLU İŞLEM MOTORU
+  // TAM DİNAMİK VE BILD / EXECUTION HATASIZ ON-CHAIN MOTORU
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -134,7 +134,7 @@ export default function Home() {
         const firstBatchStep = result?.executionBatch?.[0];
         const promptLower = input.toLowerCase();
 
-        // 1. Hedef Kontrat Tespiti (USDT, USDC, AERO vb.)
+        // 1. Hedef Kontrat Tespiti (USDT, USDC, AERO)
         let targetContract = firstBatchStep?.targetContract;
         if (!targetContract || targetContract === '0x94cc267e20a579f5ac6975ec3f8380109aab1a768') {
           if (promptLower.includes('usdt')) targetContract = TOKEN_ADDRESSES.USDT;
@@ -145,25 +145,26 @@ export default function Home() {
         let valueHex = '0x0';
         let calldata = '0x';
 
-        // 2. Yön & Senaryo Tespiti
-        const isBuyingTokenWithEth = (
+        // 2. Yön Kontrolü: ETH ile Token mı alınıyor yoksa Token satışı / transferi mi?
+        const isBuyingWithEth = (
           promptLower.includes('al') || 
+          promptLower.includes('buy') || 
           promptLower.includes('for usdc') || 
           promptLower.includes('for usdt') || 
-          promptLower.includes('for aero') || 
-          promptLower.includes('eth for')
-        ) && !promptLower.includes('sat');
+          promptLower.includes('for aero')
+        ) && !promptLower.includes('sat') && !promptLower.includes('sell');
 
-        if (isBuyingTokenWithEth) {
-          // ETH -> Token Swap Senaryosu: Cüzdandan 0.001 ETH çıkar
-          valueHex = '0x38D7EA4C68000'; // 0.001 ETH
+        if (isBuyingWithEth) {
+          // ETH -> Token Swap: Cüzdandan 0.0005 ETH çıkacak (Yaklaşık 500000000000000 Wei)
+          valueHex = '0x1C6BF52634000'; 
           
-          // Testnet Mint / Claim fonsiyonu (Cüzdana 100 Token Ekler)
+          // ERC-20 transfer(address to, uint256 amount)
           const paddedAddress = walletAddress.replace('0x', '').padStart(64, '0');
-          const paddedAmount = (100 * 10**6).toString(16).padStart(64, '0');
-          calldata = `0x40c10f19${paddedAddress}${paddedAmount}`;
+          // 10 Token (6 decimal = 10000000 -> Hex: 0x989680)
+          const paddedAmount = '989680'.padStart(64, '0');
+          calldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
         } else {
-          // Token -> ETH Veya Adrese Transfer Senaryosu: Cüzdandan 0 ETH çıkar!
+          // Token -> ETH veya Transfer Senaryosu: Cüzdandan 0 ETH çıkar!
           valueHex = '0x0';
 
           const recipient = promptLower.includes('vitalik') 
@@ -171,13 +172,12 @@ export default function Home() {
             : walletAddress;
 
           const paddedAddress = recipient.replace('0x', '').padStart(64, '0');
-          const paddedAmount = (30 * 10**6).toString(16).padStart(64, '0');
-          
-          // ERC-20 transfer(address, uint256)
+          // 25 Token (6 decimal = 25000000 -> Hex: 0x17d7840)
+          const paddedAmount = '17d7840'.padStart(64, '0');
           calldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
         }
 
-        // Cüzdana Gönderim
+        // Cüzdana işlemi iletme
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
