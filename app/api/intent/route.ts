@@ -4,17 +4,26 @@ export async function POST(req: Request) {
   try {
     const { prompt } = await req.json();
 
-    // Kullanıcıdan gelen doğal dili analiz eden mock AI yapısı
-    // İleride buraya OpenAI / Claude API'sini bağlayabiliriz.
+    // Dinamik mock yanıt üreteci
+    const isSwap = prompt.toLowerCase().includes('swap');
+    const isBridge = prompt.toLowerCase().includes('bridge');
+
     const mockParsedIntent = {
-      action: "SWAP",
-      params: {
-        fromToken: "USDC",
-        toToken: "ETH",
-        amount: "50",
-        chain: "Base"
+      protocol: "BaseIntent Engine v1",
+      chain: "Base Mainnet (8453)",
+      intent: {
+        type: isSwap ? "SWAP" : isBridge ? "BRIDGE" : "TRANSFER",
+        status: "PARSED",
+        rawPrompt: prompt,
+        parsedParams: {
+          fromToken: isSwap ? "USDC" : "ETH",
+          toToken: isSwap ? "ETH" : "USDC",
+          amount: "Auto-calculated",
+          estimatedGasFee: "~0.00004 ETH",
+          routerContract: "0x4200000000000000000000000000000000000006"
+        }
       },
-      originalPrompt: prompt
+      timestamp: new Date().toISOString()
     };
 
     return NextResponse.json({ success: true, data: mockParsedIntent });
