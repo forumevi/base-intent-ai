@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json({ 
         success: false, 
-        error: "Groq API Key eksik! Lütfen Vercel Settings -> Environment Variables altından GROQ_API_KEY ekleyip Redeploy yapın." 
+        error: "Groq API Key bulunamadı. Vercel uzerinden ekleyip Redeploy yapin." 
       }, { status: 500 });
     }
 
@@ -16,13 +16,13 @@ export async function POST(req: Request) {
       You are BaseIntent AI, an autonomous Web3 Intent Engine for Base Network (Chain ID: 8453).
       Analyze the user prompt and extract structured Web3 execution calldata, risk assessment, and batch actions.
       
-      Respond STRICTLY in JSON format with no markdown wrappers or extra prose. Structure:
+      Respond STRICTLY in JSON format. Structure:
       {
-        "intentType": "SWAP" | "BRIDGE" | "BATCH_EXECUTION" | "UNKNOWN",
+        "intentType": "SWAP",
         "confidenceScore": 0.98,
         "riskAnalysis": {
-          "score": "LOW" | "MEDIUM" | "HIGH",
-          "warnings": ["Low slippage tolerance detected", "Verified Aerodrome Router"]
+          "score": "LOW",
+          "warnings": ["Low slippage tolerance detected"]
         },
         "executionBatch": [
           {
@@ -31,16 +31,9 @@ export async function POST(req: Request) {
             "targetContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "estimatedGasUsd": "$0.002",
             "details": {}
-          },
-          {
-            "step": 2,
-            "action": "Execute Liquidity Swap on Base Pool",
-            "targetContract": "0x4200000000000000000000000000000000000006",
-            "estimatedGasUsd": "$0.012",
-            "details": {}
           }
         ],
-        "simulationSummary": "Parsed intent successfully. Calculated optimal path on Base Mainnet with 0.001% price impact."
+        "simulationSummary": "Parsed intent successfully for Base Network."
       }
     `;
 
@@ -61,16 +54,20 @@ export async function POST(req: Request) {
       })
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return NextResponse.json({ success: false, error: `Groq API Bağlantı Hatası: ${errText}` }, { status: 500 });
+    const aiData = await response.json();
+
+    if (!response.ok || !aiData.choices || !aiData.choices[0]) {
+      const errorMsg = aiData.error?.message || JSON.stringify(aiData);
+      return NextResponse.json({ 
+        success: false, 
+        error: `Groq Yanit Hatasi: ${errorMsg}` 
+      }, { status: 500 });
     }
 
-    const aiData = await response.json();
     const parsedIntent = JSON.parse(aiData.choices[0].message.content);
-
     return NextResponse.json({ success: true, data: parsedIntent });
+
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Intent parsing hatası oluştu." }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Bilinmeyen bir hata olustu." }, { status: 500 });
   }
 }
