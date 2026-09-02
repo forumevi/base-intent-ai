@@ -8,7 +8,7 @@ export async function POST(req: Request) {
     if (!apiKey) {
       return NextResponse.json({ 
         success: false, 
-        error: "Groq API Key bulunamadı. Vercel uzerinden ekleyip Redeploy yapin." 
+        error: "Groq API Key bulunamadı. Vercel ortam değişkenlerini kontrol edin." 
       }, { status: 500 });
     }
 
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-20b",
+        model: "llama-3.1-70b-versatile",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: prompt }
@@ -68,6 +68,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, data: parsedIntent });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Bilinmeyen bir hata olustu." }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Bilinmeyen bir hata oluştu." }, { status: 500 });
   }
 }
