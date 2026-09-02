@@ -12,7 +12,6 @@ export default function Home() {
   const [txStatus, setTxStatus] = useState<{ msg: string; hash?: string; isError?: boolean } | null>(null);
   const [activeTab, setActiveTab] = useState<'visual' | 'calldata'>('visual');
 
-  // Canlı Ajan Log Akışı
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 8453)",
     "LLM Router Active: Groq Llama 3 Inference Engine Listening..."
@@ -108,7 +107,7 @@ export default function Home() {
     }
   };
 
-  // Base Sepolia Ağında GERÇEK On-Chain Token Transferi ve Swap Tetikleyici
+  // TAMAMEN DİNANİK ON-CHAIN İŞLEM TETİKLEYİCİ
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -122,21 +121,25 @@ export default function Home() {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       try {
         setTxStatus({ msg: "Awaiting signature in wallet..." });
-        addLog("Generating On-Chain Calldata for Executing Agent Intent...");
+        addLog("Broadcasting Dynamic AI Intent to Base Network...");
 
-        const targetAddress = walletAddress;
-        const paddedAddress = targetAddress.replace('0x', '').padStart(64, '0');
-        const amountBigInt = BigInt("1000000000000000000"); 
-        const paddedAmount = amountBigInt.toString(16).padStart(64, '0');
-        const erc20TransferCalldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
+        // Backend API'den gelen ilk adımı dinamik olarak alıyoruz
+        const firstBatchStep = result?.executionBatch?.[0];
+        
+        // Hedef kontrat API'den dinamik gelir (USDC, USDT, Router vb.)
+        const targetContract = firstBatchStep?.targetContract || '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+        
+        // Eğer API özel calldata ürettiyse onu kullanır, yoksa standart transfer payload'ı oluşturur
+        const dynamicCalldata = firstBatchStep?.calldata || 
+          `0xa9059cbb${walletAddress.replace('0x', '').padStart(64, '0')}${(10000000).toString(16).padStart(64, '0')}`;
 
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
             from: walletAddress,
-            to: result?.executionBatch?.[0]?.targetContract || '0x4200000000000000000000000000000000000006',
-            value: '0x38D7EA4C68000', // 0.0001 ETH
-            data: erc20TransferCalldata,
+            to: targetContract, // Sabit değil, AI'ın seçtiği kontrat!
+            value: firstBatchStep?.valueHex || '0x0',
+            data: dynamicCalldata,
           }],
         });
 
@@ -153,11 +156,9 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#050508] text-white flex flex-col justify-between selection:bg-blue-500 selection:text-white font-sans relative overflow-hidden">
-      {/* Background Neon Glowing Orbs */}
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/15 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
 
-      {/* Top Live Metrics Ticker Bar */}
       <div className="w-full bg-zinc-950/80 border-b border-zinc-800/60 backdrop-blur-md px-6 py-2 text-[11px] font-mono text-zinc-400 flex justify-between items-center overflow-x-auto z-10">
         <div className="flex items-center gap-6">
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 animate-ping"/> BASE NETWORK: <strong className="text-white">ONLINE</strong></span>
@@ -171,7 +172,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Main Header */}
       <header className="w-full max-w-7xl mx-auto flex justify-between items-center px-6 py-4 z-10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">
@@ -212,10 +212,7 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main Body Grid Layout */}
       <div className="max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto z-10">
-        
-        {/* Left Column: Input & Agent Console */}
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4 backdrop-blur-md">
@@ -230,13 +227,12 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Interactive Prompt Box */}
           <div className="bg-zinc-900/60 border border-zinc-800 p-2 rounded-2xl shadow-2xl backdrop-blur-xl focus-within:border-blue-500/60 transition">
             <textarea
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap 100 USDC for ETH on Aerodrome, route through lowest gas pool, and verify safety score..."
+              placeholder="Type any intent: Swap ETH for USDC, transfer USDT, or check risk..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
@@ -257,12 +253,11 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Preset Prompt Badges */}
           <div className="space-y-2">
             <p className="text-xs font-mono text-zinc-500">TEST SUGGESTIONS FOR JUDGES:</p>
             <div className="flex flex-wrap gap-2">
               {[
-                "Swap 100 USDC for ETH and check pool risk",
+                "Swap 0.0005 ETH for USDC",
                 "Bridge 0.05 ETH to Base and swap 50% to AERO",
                 "Send 25 USDC to vitalik.base with gas optimization"
               ].map((p, idx) => (
@@ -277,7 +272,6 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Live Agent Terminal Stream */}
           <div className="bg-zinc-950/90 border border-zinc-800/80 rounded-2xl p-4 font-mono text-xs">
             <div className="flex justify-between items-center border-b border-zinc-800/60 pb-2 mb-3">
               <span className="text-zinc-500 flex items-center gap-2">
@@ -293,11 +287,9 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Right Column: Dynamic Agent Result Dashboard */}
         <div className="lg:col-span-5 flex flex-col justify-center">
           {result ? (
             <div className="bg-zinc-950/90 border border-zinc-800/90 rounded-2xl p-6 shadow-2xl backdrop-blur-xl space-y-5 relative">
-              {/* Header Tab Switcher */}
               <div className="flex justify-between items-center border-b border-zinc-800/80 pb-3">
                 <div className="flex gap-2">
                   <button 
@@ -320,7 +312,6 @@ export default function Home() {
 
               {activeTab === 'visual' ? (
                 <>
-                  {/* Summary Cards */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
                       <span className="text-[10px] font-mono text-zinc-500 block">INTENT TYPE</span>
@@ -334,7 +325,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Agent Summary */}
                   <div>
                     <h4 className="text-[11px] font-mono text-zinc-400 mb-1">AGENT SIMULATION</h4>
                     <p className="text-xs text-zinc-300 bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/60 leading-relaxed">
@@ -342,7 +332,6 @@ export default function Home() {
                     </p>
                   </div>
 
-                  {/* Execution Steps */}
                   <div>
                     <h4 className="text-[11px] font-mono text-zinc-400 mb-2">EXECUTION BUNDLE</h4>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
@@ -364,13 +353,11 @@ export default function Home() {
                   </div>
                 </>
               ) : (
-                /* Raw Payload / Calldata View */
                 <div className="bg-zinc-900/90 p-3 rounded-xl border border-zinc-800 font-mono text-[11px] text-green-400 overflow-x-auto max-h-64">
                   <pre>{JSON.stringify(result, null, 2)}</pre>
                 </div>
               )}
 
-              {/* Action Button */}
               <div className="space-y-2 pt-2">
                 <button
                   onClick={handleSignAndBroadcast}
@@ -392,7 +379,6 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            /* Standby State */
             <div className="bg-zinc-950/40 border border-dashed border-zinc-800/80 rounded-2xl p-8 text-center backdrop-blur-md">
               <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center text-zinc-500 mb-3 font-mono">
                 🤖
@@ -404,10 +390,8 @@ export default function Home() {
             </div>
           )}
         </div>
-
       </div>
 
-      {/* Footer */}
       <footer className="w-full max-w-7xl mx-auto px-6 py-4 border-t border-zinc-900 flex justify-between items-center text-xs text-zinc-600 font-mono z-10">
         <span>BaseIntent AI Engine v1.0.4</span>
         <span>Base Creator Grant Candidate</span>
