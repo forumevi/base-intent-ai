@@ -9,15 +9,11 @@ const BASE_TOKENS: Record<string, string> = {
   AERO: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
 };
 
-// Fallback Parser: Groq API çökse veya anahtar olmasa bile metni Regex ile çözer
 function fallbackParseIntent(prompt: string) {
   const cleanPrompt = prompt.toUpperCase();
-  
-  // Miktarı yakala (ör. 0.0001, 1.5, 10)
   const amountMatch = prompt.match(/(\d+(\.\d+)?)/);
   const amount = amountMatch ? amountMatch[0] : '0.0001';
 
-  // Hedef token'ları tespit et
   let buyToken = 'USDC';
   if (cleanPrompt.includes('USDT')) buyToken = 'USDT';
   else if (cleanPrompt.includes('DAI')) buyToken = 'DAI';
@@ -45,7 +41,6 @@ export async function POST(req: Request) {
     let parsedIntent: any = null;
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-    // 1. Groq LLM Çağrısı
     if (GROQ_API_KEY) {
       try {
         const systemPrompt = `You are a Base Blockchain Intent Agent. Convert the user request into JSON.
@@ -72,7 +67,7 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
           const groqData = await groqRes.json();
           const content = groqData?.choices?.[0]?.message?.content;
           if (content) {
-            const jsonMatch = content.match(/\{[\s\S]*\/);
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
               parsedIntent = JSON.parse(jsonMatch[0]);
             }
@@ -83,7 +78,6 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
       }
     }
 
-    // Groq yanıt veremezse güvenli Fallback çalışır
     if (!parsedIntent) {
       parsedIntent = fallbackParseIntent(prompt);
     }
@@ -96,7 +90,6 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
     const buyTokenAddress = BASE_TOKENS[buyTokenSymbol] || BASE_TOKENS.USDC;
     const sellAmountWei = (BigInt(Math.floor(parseFloat(sellAmount) * 1e18))).toString();
 
-    // 2. DEX Aggregator Payload Yapılandırması
     let aggregatorQuote: any = null;
     
     if (process.env.ZEROX_API_KEY) {
@@ -124,11 +117,10 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
       }
     }
 
-    // 0x API yanıt vermezse güvenli Router Payload şablonu
     if (!aggregatorQuote || !aggregatorQuote.transaction) {
       aggregatorQuote = {
         transaction: {
-          to: '0x2626664c2603336E57B271c5C0b26F421741e481', // Base Mainnet Router
+          to: '0x2626664c2603336E57B271c5C0b26F421741e481',
           data: '0x',
           value: `0x${BigInt(sellAmountWei).toString(16)}`
         }
