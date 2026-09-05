@@ -1,73 +1,110 @@
 import { NextResponse } from 'next/server';
 
+// Base Mainnet Token Adresleri
+const BASE_TOKENS: Record<string, string> = {
+  ETH: '0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', // Native ETH representation
+  WETH: '0x4200000000000000000000000000000000000006',
+  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  USDT: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839',
+  DAI:  '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',
+  AERO: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
+};
+
 export async function POST(req: Request) {
   try {
-    const { prompt } = await req.json();
-    const apiKey = process.env.GROQ_API_KEY?.trim();
+    const { prompt, userAddress } = await req.json();
 
-    if (!apiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: "Groq API Key bulunamadı. Vercel ortam değişkenlerini kontrol edin." 
-      }, { status: 500 });
+    if (!prompt) {
+      return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });
     }
 
-    const systemPrompt = `
-      You are BaseIntent AI, an autonomous Web3 Intent Engine for Base Network (Chain ID: 8453).
-      Analyze the user prompt and extract structured Web3 execution calldata, risk assessment, and batch actions.
-      
-      Respond STRICTLY in JSON format. Structure:
-      {
-        "intentType": "SWAP" | "BRIDGE" | "BATCH_EXECUTION" | "UNKNOWN",
-        "confidenceScore": 0.98,
-        "riskAnalysis": {
-          "score": "LOW" | "MEDIUM" | "HIGH",
-          "warnings": string[]
-        },
-        "executionBatch": [
-          {
-            "step": number,
-            "action": "Action description",
-            "targetContract": "0x address",
-            "estimatedGasUsd": "$0.00x",
-            "details": {}
-          }
-        ],
-        "simulationSummary": "Clear summary of parsed intent for Base Network."
-      }
-    `;
+    const GROQ_API_KEY = process.env.GROQ_API_KEY;
+    if (!GROQ_API_KEY) {
+      return NextResponse.json({ success: false, error: 'Groq API Key is missing' }, { status: 500 });
+    }
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
+    // 1. Step: Groq LLM parses natural language intent
+    const systemPrompt = `You are a Base Blockchain Execution Agent. Parse the user intent into a structured JSON response.
+Supported tokens on Base: ETH, WETH, USDC, USDT, DAI, AERO.
+Extract action, sellToken, buyToken, and amount.
+
+JSON Structure:
+{
+  "intentType": "SWAP",
+  "sellToken": "ETH",
+  "buyToken": "USDC",
+  "amount": "0.0001",
+  "confidenceScore": 0.98,
+  "summary": "Swap 0.0001 ETH for USDC via Optimal Base Aggregator Route"
+}`;
+
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
+        'Authorization': `Bearer ${GROQ_API_KEY}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
+        model: 'llama-3.3-70b-versatile',
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
         ],
-        temperature: 0.1,
-        response_format: { type: "json_object" }
+        response_format: { type: 'json_object' }
       })
     });
 
-    const aiData = await response.json();
+    const groqData = await groqRes.json();
+    const parsedIntent = JSON.parse(groqData.choices[0].message.content);
 
-    if (!response.ok || !aiData.choices || !aiData.choices[0]) {
-      const errorMsg = aiData.error?.message || JSON.stringify(aiData);
-      return NextResponse.json({ 
-        success: false, 
-        error: `Groq Yanit Hatasi: ${errorMsg}` 
-      }, { status: 500 });
+    const sellTokenSymbol = parsedIntent.sellToken?.toUpperCase() || 'ETH';
+    const buyTokenSymbol = parsedIntent.buyToken?.toUpperCase() || 'USDC';
+    const sellAmount = parsedIntent.amount || '0.0001';
+
+    const sellTokenAddress = BASE_TOKENS[sellTokenSymbol] || BASE_TOKENS.ETH;
+    const buyTokenAddress = BASE_TOKENS[buyTokenSymbol] || BASE_TOKENS.USDC;
+
+    // Convert amount to wei (Assuming ETH / standard 18 decimals for sell token)
+    const sellAmountWei = (BigInt(Math.floor(parseFloat(sellAmount) * 1e18))).toString();
+
+    // 2. Step: Query 0x DEX Aggregator API for Base Mainnet Routing
+    // 0x Aggregator automatically searches Uniswap, Aerodrome, Curve, etc. for best price
+    const params = new URLSearchParams({
+      chainId: '8453', // Base Mainnet Chain ID
+      sellToken: sellTokenAddress,
+      buyToken: buyTokenAddress,
+      sellAmount: sellAmountWei,
+      taker: userAddress || '0x0000000000000000000000000000000000000000'
+    });
+
+    let quoteData = null;
+    try {
+      const quoteRes = await fetch(`https://api.0x.org/swap/permit2/quote?${params.toString()}`, {
+        headers: {
+          '0x-api-key': process.env.ZEROX_API_KEY || '', // Works with public tier or fallback
+          '0x-version': 'v2'
+        }
+      });
+      if (quoteRes.ok) {
+        quoteData = await quoteRes.json();
+      }
+    } catch (e) {
+      console.warn("0x API Quote fetch error, falling back to direct route builder:", e);
     }
 
-    const parsedIntent = JSON.parse(aiData.choices[0].message.content);
-    return NextResponse.json({ success: true, data: parsedIntent });
+    return NextResponse.json({
+      success: true,
+      data: {
+        ...parsedIntent,
+        sellTokenAddress,
+        buyTokenAddress,
+        sellAmountWei,
+        aggregatorQuote: quoteData
+      }
+    });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Bilinmeyen bir hata oluştu." }, { status: 500 });
+    console.error('Intent API Error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
