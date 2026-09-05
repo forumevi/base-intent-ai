@@ -4,7 +4,7 @@ import { encodeFunctionData, parseEther, parseUnits } from 'viem';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Uniswap V3 SwapRouter02 & Token Kataloğu
+// Base Sepolia Router & Token Kataloğu
 const UNISWAP_V3_ROUTER = '0x94cC0aaC535CCDB3C01d6787d6413C739ae12bc4';
 
 const TOKEN_CATALOG: Record<string, { address: string; decimals: number; fee: number }> = {
@@ -12,11 +12,9 @@ const TOKEN_CATALOG: Record<string, { address: string; decimals: number; fee: nu
   USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6, fee: 3000 },
   DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18, fee: 3000 },
   AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18, fee: 10000 },
-  WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18, fee: 3000 },
-  WBTC: { address: '0x1A0883a31d4546BCE8A962E33A3eCD7C17a6dCD0', decimals: 8, fee: 3000 }
+  WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18, fee: 3000 }
 };
 
-// Uniswap V3 SwapRouter02 ABI Yapısı
 const SWAP_ROUTER_ABI = [
   {
     inputs: [
@@ -41,7 +39,6 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
-// ERC20 Approve ABI Yapısı
 const ERC20_ABI = [
   {
     inputs: [
@@ -66,7 +63,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "Universal Token Router Ready (USDC, USDT, DAI, AERO, WBTC)"
+    "Universal Token Router Active (USDC, USDT, DAI, AERO)"
   ]);
 
   const addLog = (msg: string) => {
@@ -176,7 +173,6 @@ export default function Home() {
         if (text.includes('USDT')) targetToken = 'USDT';
         else if (text.includes('DAI')) targetToken = 'DAI';
         else if (text.includes('AERO')) targetToken = 'AERO';
-        else if (text.includes('WBTC')) targetToken = 'WBTC';
 
         const tokenObj = TOKEN_CATALOG[targetToken] || TOKEN_CATALOG.USDC;
         const wethAddress = TOKEN_CATALOG.WETH.address;
@@ -186,22 +182,21 @@ export default function Home() {
                              text.includes(`${targetToken} TO ETH`);
 
         if (isTokenToEth) {
-          setTxStatus({ msg: `1/2: Preparing Allowance for ${targetToken}...` });
-
+          setTxStatus({ msg: `1/2: Allowance setup for ${targetToken}...` });
           const tokenAmount = parseUnits('1', tokenObj.decimals);
 
           try {
-            const resetApproveCalldata = encodeFunctionData({
+            const resetCalldata = encodeFunctionData({
               abi: ERC20_ABI,
               functionName: 'approve',
               args: [UNISWAP_V3_ROUTER as `0x${string}`, BigInt(0)]
             });
             await eth.request({
               method: 'eth_sendTransaction',
-              params: [{ from: walletAddress, to: tokenObj.address, data: resetApproveCalldata }],
+              params: [{ from: walletAddress, to: tokenObj.address, data: resetCalldata }],
             });
           } catch (e) {
-            console.log("Approve reset bypass/ok", e);
+            console.log("Reset approve bypass", e);
           }
 
           const approveCalldata = encodeFunctionData({
@@ -215,7 +210,7 @@ export default function Home() {
             params: [{ from: walletAddress, to: tokenObj.address, data: approveCalldata }],
           });
 
-          setTxStatus({ msg: `2/2: Swapping ${targetToken} to ETH...` });
+          setTxStatus({ msg: `2/2: Executing Swap ${targetToken} -> ETH...` });
 
           const swapCalldata = encodeFunctionData({
             abi: SWAP_ROUTER_ABI,
@@ -333,13 +328,13 @@ export default function Home() {
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Universal Token Router (All Tokens Supported)
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Universal Token Router
             </div>
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
               Natural Language to On-Chain Execution.
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-xl">
-              Swap ETH for USDC, USDT, DAI, AERO or WBTC in any direction seamlessly.
+              Swap ETH for USDC, USDT, DAI or AERO seamlessly on Base Sepolia.
             </p>
           </div>
 
@@ -348,7 +343,7 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap 0.0002 ETH for DAI or Swap USDT for ETH..."
+              placeholder="e.g. Swap 0.0002 ETH for USDC or Swap USDC for ETH..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
@@ -367,10 +362,10 @@ export default function Home() {
             <p className="text-xs font-mono text-zinc-500">TEST INTENTS:</p>
             <div className="flex flex-wrap gap-2">
               {[
-                "Swap 0.0002 ETH for DAI",
-                "Swap 0.0002 ETH for USDT",
                 "Swap 0.0002 ETH for USDC",
-                "Swap DAI for ETH"
+                "Swap 0.0002 ETH for USDT",
+                "Swap 0.0002 ETH for DAI",
+                "Swap USDC for ETH"
               ].map((p, idx) => (
                 <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
                   ⚡ {p}
