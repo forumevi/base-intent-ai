@@ -16,14 +16,16 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showMainnetWarning, setShowMainnetWarning] = useState(false);
 
-  const isBaseNetwork = chainId === base.id || chainId === baseSepolia.id;
+  const isMainnet = chainId === base.id;
   const isSepolia = chainId === baseSepolia.id;
 
   const [agentLogs, setAgentLogs] = useState<string[]>([
-    'SYSTEM_INIT: Base Agentic Execution Engine Online',
-    'AI_CORE: Groq Llama-3.3-70B Quantized Intent Parser Ready',
-    'AWAITING_INTENT: Enter prompt or select quick preset below'
+    'AGENT_CORE_INIT: Base L2 Execution Layer Active',
+    'AI_INTENT_PARSER: Llama-3.3-70B Neural Engine Online',
+    'SAFETY_GUARD: Multi-call Slippage Protection Active',
+    'AWAITING_INPUT: Select preset or input plain English prompt...'
   ]);
 
   useEffect(() => {
@@ -31,15 +33,12 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (isConnected && address) {
-      const netName = chainId === baseSepolia.id ? 'Base Sepolia Testnet' : chainId === base.id ? 'Base Mainnet' : 'Unsupported Network';
-      setAgentLogs((prev) => [
-        `NETWORK_DETECTED: Active on ${netName} (Chain ID: ${chainId})`,
-        `WALLET_CONNECTED: ${address.slice(0, 6)}...${address.slice(-4)}`,
-        ...prev
-      ]);
+    if (isConnected && isMainnet) {
+      setShowMainnetWarning(true);
+    } else {
+      setShowMainnetWarning(false);
     }
-  }, [isConnected, address, chainId]);
+  }, [isConnected, isMainnet]);
 
   const handleConnect = () => {
     const connector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
@@ -63,8 +62,8 @@ export default function Home() {
     setLastTxHash(null);
 
     setAgentLogs((prev) => [
-      `[${new Date().toLocaleTimeString()}] EXECUTION_START: Routing intent through Base AI Engine...`,
-      `[${new Date().toLocaleTimeString()}] PROMPT: "${activePrompt}"`,
+      `[${new Date().toLocaleTimeString()}] INTENT_RECEIVE: "${activePrompt}"`,
+      `[${new Date().toLocaleTimeString()}] PARSING: Evaluating Base V3 Liquidity Routes...`,
       ...prev
     ]);
 
@@ -72,11 +71,7 @@ export default function Home() {
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: activePrompt, 
-          userAddress: address,
-          chainId: chainId 
-        })
+        body: JSON.stringify({ prompt: activePrompt, userAddress: address })
       });
 
       const resData = await res.json();
@@ -87,12 +82,12 @@ export default function Home() {
 
       const txData = resData.data?.aggregatorQuote?.transaction;
       if (!txData || !txData.to) {
-        throw new Error('API did not return valid execution payload.');
+        throw new Error('Invalid calldata from Intent Engine');
       }
 
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] INTENT_PARSED: Confidence ${resData.data.confidenceScore || '98'}%`,
-        `[${new Date().toLocaleTimeString()}] PROMPTING_WALLET: Sign transaction on ${isSepolia ? 'Sepolia' : 'Mainnet'}`,
+        `[${new Date().toLocaleTimeString()}] ROUTE_FOUND: ${resData.data.sellToken} ➔ ${resData.data.buyToken} (${resData.data.amount} ${resData.data.sellToken})`,
+        `[${new Date().toLocaleTimeString()}] PROMPTING_WALLET: Please approve in wallet...`,
         ...prev
       ]);
 
@@ -104,14 +99,14 @@ export default function Home() {
 
       setLastTxHash(txHash);
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] SUCCESS: Tx broadcasted to Base block graph!`,
-        `[${new Date().toLocaleTimeString()}] TX_HASH: ${txHash}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_SUCCESS: Transaction Confirmed!`,
+        `[${new Date().toLocaleTimeString()}] HASH: ${txHash}`,
         ...prev
       ]);
 
     } catch (err: any) {
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] ERROR: ${err.message || 'Execution reverted'}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_REVERTED: ${err.message || 'User rejected or simulation failed'}`,
         ...prev
       ]);
     } finally {
@@ -122,36 +117,61 @@ export default function Home() {
   if (!mounted) return null;
 
   return (
-    <main className="min-h-screen bg-[#050811] text-slate-100 flex flex-col items-center p-4 md:p-8 relative font-sans selection:bg-blue-500 selection:text-white">
+    <main className="min-h-screen bg-[#02040a] text-slate-100 flex flex-col items-center p-3 md:p-6 font-mono relative selection:bg-blue-600 selection:text-white">
       
-      {/* GLOW DECORATIONS */}
-      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[250px] bg-blue-600/15 blur-[120px] pointer-events-none rounded-full" />
-      <div className="absolute top-40 left-1/4 w-[300px] h-[200px] bg-cyan-500/10 blur-[100px] pointer-events-none rounded-full" />
+      {/* TOP LIVE METRICS DASHBOARD BAR (İLK SİTEDEKİ ZENGİN METRİK BARI) */}
+      <div className="w-full max-w-4xl bg-slate-950/90 border border-slate-800/80 rounded-xl p-2.5 mb-6 flex flex-wrap items-center justify-between text-[11px] gap-3 text-slate-400 backdrop-blur-md">
+        <div className="flex items-center gap-4 overflow-x-auto">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="text-slate-200 font-bold">BASE ENGINE:</span>
+            <span className="text-emerald-400">ONLINE</span>
+          </div>
+          <div className="h-3 w-[1px] bg-slate-800" />
+          <div>
+            <span className="text-slate-500">GAS:</span> <span className="text-slate-200">~0.003 Gwei</span>
+          </div>
+          <div className="h-3 w-[1px] bg-slate-800" />
+          <div>
+            <span className="text-slate-500">ROUTER:</span> <span className="text-blue-400 font-bold">Uniswap V3</span>
+          </div>
+          <div className="h-3 w-[1px] bg-slate-800" />
+          <div>
+            <span className="text-slate-500">LLAMA:</span> <span className="text-indigo-400">3.3-70B Quantized</span>
+          </div>
+        </div>
 
-      {/* HEADER BAR */}
-      <header className="w-full max-w-3xl z-10 flex items-center justify-between py-3.5 px-6 rounded-2xl bg-slate-900/60 backdrop-blur-xl border border-slate-800/80 mb-8 shadow-2xl">
+        <div className="flex items-center gap-2">
+          <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold">
+            Base Builder Grant
+          </span>
+        </div>
+      </div>
+
+      {/* MAIN NAVIGATION HEADER */}
+      <header className="w-full max-w-4xl flex items-center justify-between py-3 px-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 mb-6 backdrop-blur-xl">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black text-sm shadow-inner">
-            ⚡
+          <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black text-base shadow-inner">
+            🛡️
           </div>
           <div>
             <div className="font-extrabold text-sm tracking-wide text-white flex items-center gap-2">
               BASE INTENT AI
-              <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                v2.0 Agent
+              <span className="text-[9px] font-semibold px-2 py-0.5 rounded bg-blue-600/30 text-blue-300 border border-blue-400/30">
+                PROD AGENT
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-mono">Autonomous On-Chain Execution</p>
+            <p className="text-[10px] text-slate-400">Autonomous DeFi Execution Platform</p>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* NETWORK SWITCHER BUTTON */}
+          {/* NETWORK SWITCHER */}
           {isConnected && (
-            <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-xl p-1 font-mono text-xs">
+            <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
               <button
                 onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
                   isSepolia 
                     ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40' 
                     : 'text-slate-400 hover:text-white'
@@ -161,9 +181,9 @@ export default function Home() {
               </button>
               <button
                 onClick={() => switchChain?.({ chainId: base.id })}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  chainId === base.id 
-                    ? 'bg-blue-600 text-white font-bold shadow-md' 
+                className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
+                  isMainnet 
+                    ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30' 
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
@@ -176,14 +196,14 @@ export default function Home() {
           {isConnected ? (
             <button 
               onClick={() => disconnect()}
-              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 font-mono font-medium px-3.5 py-2 rounded-xl border border-red-500/30 transition shadow-sm cursor-pointer"
+              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 font-mono px-3.5 py-1.5 rounded-xl border border-red-500/30 transition cursor-pointer"
             >
-              {address?.slice(0, 6)}...{address?.slice(-4)} ✕
+              {address?.slice(0, 6)}...{address?.slice(-4)}
             </button>
           ) : (
             <button 
               onClick={handleConnect}
-              className="text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer font-mono"
+              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
             >
               Connect Wallet 🔒
             </button>
@@ -191,88 +211,68 @@ export default function Home() {
         </div>
       </header>
 
-      {/* NETWORK STATUS BANNER */}
-      {isConnected && !isBaseNetwork && (
-        <div className="w-full max-w-3xl mb-6 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs font-mono flex items-center justify-between z-10 backdrop-blur-md">
-          <span className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-            </span>
-            ⚠️ You are on an unsupported network. Please switch to Base.
-          </span>
-          <button 
-            onClick={() => switchChain?.({ chainId: base.id })}
-            className="underline font-bold text-white hover:text-red-200"
+      {/* CRITICAL MAINNET WARNING MODAL / POPUP */}
+      {showMainnetWarning && (
+        <div className="w-full max-w-4xl mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between backdrop-blur-md shadow-2xl animate-fade-in">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">⚠️</span>
+            <div>
+              <div className="font-bold text-amber-400 text-sm">REAL MAINNET FUNDS ACTIVE</div>
+              <div className="text-[11px] text-amber-300/80">
+                You are on Base Mainnet (Chain ID 8453). Real ETH/Tokens will be spent. For safe testing, switch to Sepolia.
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 font-bold shrink-0 transition"
           >
-            Switch to Base Mainnet ➔
+            Switch to Sepolia Testnet ➔
           </button>
         </div>
       )}
 
-      {/* MAIN CONTAINER */}
-      <div className="max-w-3xl w-full z-10 space-y-6">
+      {/* MAIN CONTENT WORKSPACE */}
+      <div className="max-w-4xl w-full space-y-6">
         
-        {/* TITLE SECTION */}
-        <div className="text-center space-y-3 py-2">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            Base Builder Grant Submission
-          </div>
-          <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight leading-tight">
-            Natural Language <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-400">DeFi Agent</span>
+        {/* HERO TITLE */}
+        <div className="text-center space-y-2 py-4">
+          <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight">
+            Base Agentic <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-400">Intent Protocol</span>
           </h1>
-          <p className="text-slate-400 text-xs md:text-sm max-w-lg mx-auto font-mono">
-            Type plain English intents to swap tokens, bridge assets, and execute smart contracts directly on Base L2.
+          <p className="text-slate-400 text-xs md:text-sm max-w-md mx-auto">
+            Execute complex DeFi transactions with plain English sentences.
           </p>
         </div>
 
-        {/* ACTIVE NETWORK INDICATOR BADGE */}
-        <div className="flex items-center justify-between px-2 text-xs font-mono text-slate-400">
-          <div className="flex items-center gap-2">
-            <span className="text-slate-500">TARGET NETWORK:</span>
-            <span className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
-              isSepolia 
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-            }`}>
-              {isSepolia ? 'BASE SEPOLIA TESTNET' : 'BASE MAINNET'}
-            </span>
-          </div>
-          <div className="text-slate-500 hidden md:block">
-            SLIPPAGE: <span className="text-slate-300">AUTO (0.5%)</span>
-          </div>
-        </div>
-
         {/* INPUT PROMPT CARD */}
-        <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-3xl p-6 space-y-4 shadow-2xl relative overflow-hidden group hover:border-slate-700/80 transition-all">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-2xl backdrop-blur-xl relative">
+          <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              INTENT PROMPT INPUT
+            </span>
+            <span>TARGET: <strong className="text-slate-200">{isSepolia ? 'BASE SEPOLIA' : 'BASE MAINNET'}</strong></span>
+          </div>
+
           <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. Swap 0.0001 ETH for USDC on Base..."
-              className="w-full h-32 bg-[#03050a] border border-slate-800/80 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono resize-none transition-all"
+              placeholder="e.g. Swap 0.0001 ETH for USDC..."
+              className="w-full h-32 bg-[#010308] border border-slate-800/80 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono resize-none transition-all"
             />
             
-            <div className="absolute bottom-4 right-4 flex items-center gap-2">
-              <button
-                onClick={() => handleRunAgent()}
-                disabled={loading}
-                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 disabled:opacity-40 transition-all font-mono cursor-pointer flex items-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Executing...
-                  </>
-                ) : (
-                  <>Execute Intent ⚡</>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={() => handleRunAgent()}
+              disabled={loading}
+              className="absolute bottom-4 right-4 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 disabled:opacity-40 transition-all font-mono cursor-pointer flex items-center gap-2"
+            >
+              {loading ? 'Processing Agent...' : 'Execute Intent ⚡'}
+            </button>
           </div>
 
-          {/* PRESET PROMPT BUTTONS */}
+          {/* SAFE PRESET BUTTONS (GÜVENLİ MİKTARLI BUTONLAR) */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono pt-1">
             <button
               onClick={() => { 
@@ -280,10 +280,10 @@ export default function Home() {
                 setPrompt(p); 
                 handleRunAgent(p); 
               }}
-              className="p-3 rounded-xl bg-[#03050a] border border-slate-800 hover:border-blue-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between group/btn cursor-pointer"
+              className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-blue-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
             >
               <span>🔄 Swap 0.0001 ETH ➔ USDC</span>
-              <span className="text-blue-400 opacity-0 group-hover/btn:opacity-100 transition-opacity">➔</span>
+              <span className="text-blue-400 text-xs">Safe Micro-Tx</span>
             </button>
 
             <button
@@ -292,57 +292,57 @@ export default function Home() {
                 setPrompt(p); 
                 handleRunAgent(p); 
               }}
-              className="p-3 rounded-xl bg-[#03050a] border border-slate-800 hover:border-blue-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between group/btn cursor-pointer"
+              className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-blue-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
             >
               <span>🔄 Swap 1 USDC ➔ ETH</span>
-              <span className="text-blue-400 opacity-0 group-hover/btn:opacity-100 transition-opacity">➔</span>
+              <span className="text-blue-400 text-xs">Safe Micro-Tx</span>
             </button>
           </div>
         </div>
 
-        {/* SUCCESS TRANSACTION CARD */}
+        {/* TRANSACTION SUCCESS CARD */}
         {lastTxHash && (
-          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono flex items-center justify-between shadow-xl backdrop-blur-md animate-fade-in">
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono flex items-center justify-between shadow-xl backdrop-blur-md">
             <div className="flex items-center gap-2">
               <span className="text-base">🎉</span>
               <div>
-                <div className="font-bold">Transaction Confirmed!</div>
-                <div className="text-[11px] text-emerald-400/80">Executed on {isSepolia ? 'Base Sepolia' : 'Base Mainnet'}</div>
+                <div className="font-bold">Transaction Successfully Broadcasted!</div>
+                <div className="text-[11px] text-emerald-400/80">Confirmed on {isSepolia ? 'Base Sepolia' : 'Base Mainnet'}</div>
               </div>
             </div>
             <a 
               href={isSepolia ? `https://sepolia.basescan.org/tx/${lastTxHash}` : `https://base.blockscout.com/tx/${lastTxHash}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 transition font-bold"
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 transition font-bold"
             >
-              View Explorer ↗
+              View Block Explorer ↗
             </a>
           </div>
         )}
 
-        {/* LIVE TELEMETRY LOGS */}
-        <div className="bg-[#020306] border border-slate-800/80 rounded-2xl p-5 font-mono text-xs space-y-3 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-            <div className="text-slate-400 font-bold tracking-wider text-[11px] flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping" />
-              AGENTIC EXECUTION TELEMETRY LOGS
-            </div>
-            <span className="text-[10px] text-slate-500">REALTIME MONITOR</span>
+        {/* TELEMETRY LOGS */}
+        <div className="bg-[#010206] border border-slate-800/80 rounded-2xl p-4 font-mono text-xs space-y-2.5 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5 text-[11px]">
+            <span className="text-slate-400 font-bold flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              REALTIME AGENT TELEMETRY LOGS
+            </span>
+            <span className="text-slate-500">LIVE FEED</span>
           </div>
 
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-800">
+          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2">
             {agentLogs.map((log, i) => (
-              <div key={i} className="leading-relaxed flex items-start gap-2">
-                <span className="text-blue-500 shrink-0">›</span>
+              <div key={i} className="leading-relaxed flex items-start gap-2 text-[11px]">
+                <span className="text-blue-500 font-bold shrink-0">›</span>
                 <span className={
-                  log.includes('SUCCESS') || log.includes('CONFIRMED')
-                    ? 'text-emerald-400 font-semibold' 
-                    : log.includes('EXECUTION_START') || log.includes('PROMPTING') 
+                  log.includes('SUCCESS') 
+                    ? 'text-emerald-400 font-bold' 
+                    : log.includes('ROUTE_FOUND') 
                     ? 'text-blue-300' 
-                    : log.includes('ERROR')
+                    : log.includes('EXECUTION_REVERTED')
                     ? 'text-red-400 font-bold'
-                    : 'text-slate-400'
+                    : 'text-slate-300'
                 }>
                   {log}
                 </span>
@@ -352,11 +352,6 @@ export default function Home() {
         </div>
 
       </div>
-
-      {/* FOOTER */}
-      <footer className="mt-12 text-center text-[11px] text-slate-600 font-mono">
-        Built for Base Builder Grants • Powered by Groq Llama 3.3 & Uniswap V3 Engine
-      </footer>
     </main>
   );
 }
