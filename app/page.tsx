@@ -4,13 +4,14 @@ import { encodeFunctionData, parseEther, parseUnits } from 'viem';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Router & Token Kataloğu
+// Base Sepolia Uniswap V3 SwapRouter02
 const UNISWAP_V3_ROUTER = '0x94cC0aaC535CCDB3C01d6787d6413C739ae12bc4';
 
+// Testnet Likiditesi Yüksek Token Kataloğu (Fee Tier Optimizasyonlu)
 const TOKEN_CATALOG: Record<string, { address: string; decimals: number; fee: number }> = {
   USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6, fee: 3000 },
-  USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6, fee: 3000 },
-  DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18, fee: 3000 },
+  USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6, fee: 10000 }, // %1 Havuz Katmanı
+  DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18, fee: 10000 }, // %1 Havuz Katmanı (Revert Korumalı)
   AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18, fee: 10000 },
   WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18, fee: 3000 }
 };
@@ -63,7 +64,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "Universal Token Router Active (USDC, USDT, DAI, AERO)"
+    "Universal Token Router Ready (USDC, USDT, DAI, AERO)"
   ]);
 
   const addLog = (msg: string) => {
@@ -182,9 +183,10 @@ export default function Home() {
                              text.includes(`${targetToken} TO ETH`);
 
         if (isTokenToEth) {
-          setTxStatus({ msg: `1/2: Allowance setup for ${targetToken}...` });
+          setTxStatus({ msg: `1/2: Approving ${targetToken}...` });
           const tokenAmount = parseUnits('1', tokenObj.decimals);
 
+          // Reset approve
           try {
             const resetCalldata = encodeFunctionData({
               abi: ERC20_ABI,
@@ -210,7 +212,7 @@ export default function Home() {
             params: [{ from: walletAddress, to: tokenObj.address, data: approveCalldata }],
           });
 
-          setTxStatus({ msg: `2/2: Executing Swap ${targetToken} -> ETH...` });
+          setTxStatus({ msg: `2/2: Swapping ${targetToken} to ETH...` });
 
           const swapCalldata = encodeFunctionData({
             abi: SWAP_ROUTER_ABI,
@@ -237,7 +239,7 @@ export default function Home() {
         } else {
           setTxStatus({ msg: `Executing ETH -> ${targetToken} Swap...` });
 
-          let rawEth = '0.0002';
+          let rawEth = '0.0001'; // Düşük tutar kayma (slippage) hatasını engeller
           const match = input.match(/(\d+\.?\d*)\s*eth/i);
           if (match && match[1]) rawEth = match[1];
 
@@ -343,7 +345,7 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap 0.0002 ETH for USDC or Swap USDC for ETH..."
+              placeholder="e.g. Swap 0.0001 ETH for DAI or Swap USDC for ETH..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
@@ -362,9 +364,9 @@ export default function Home() {
             <p className="text-xs font-mono text-zinc-500">TEST INTENTS:</p>
             <div className="flex flex-wrap gap-2">
               {[
-                "Swap 0.0002 ETH for USDC",
-                "Swap 0.0002 ETH for USDT",
-                "Swap 0.0002 ETH for DAI",
+                "Swap 0.0001 ETH for USDC",
+                "Swap 0.0001 ETH for DAI",
+                "Swap 0.0001 ETH for USDT",
                 "Swap USDC for ETH"
               ].map((p, idx) => (
                 <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
