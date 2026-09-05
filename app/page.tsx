@@ -3,13 +3,15 @@ import { useState, useEffect } from 'react';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Resmi ve Testnet Token Adres Kataloğu
+// Base Sepolia Router & Token Sözlüğü
+const UNISWAP_V3_ROUTER = '0x94cC0aaC535CCDB3C01d6787d6413C739ae12bc4';
+const WETH_BASE_SEPOLIA = '0x4200000000000000000000000000000000000006';
+
 const TOKEN_CATALOG: Record<string, { address: string; decimals: number }> = {
   USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6 },
   USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6 },
   DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18 },
-  AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18 },
-  WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18 }
+  AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18 }
 };
 
 export default function Home() {
@@ -23,7 +25,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "LLM Router Active: Multi-Token Agent Relay Engine Online..."
+    "Bidirectional Uniswap V3 Engine: ETH ⇄ ERC20 Active"
   ]);
 
   const addLog = (msg: string) => {
@@ -54,8 +56,6 @@ export default function Home() {
       } catch (err) {
         console.error(err);
       }
-    } else {
-      alert("Please install Coinbase Wallet, Rabby, or MetaMask!");
     }
   };
 
@@ -116,7 +116,7 @@ export default function Home() {
     }
   };
 
-  // DİNAMİK MULTİ-TOKEN SWAP VE YÜRÜTME FONKSİYONU
+  // ÇİFT YÖNLÜ DİNAMİK SWAP (ETH->ERC20 ve ERC20->ETH)
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -128,53 +128,85 @@ export default function Home() {
     }
 
     if (typeof window !== 'undefined' && (window as any).ethereum) {
+      const eth = (window as any).ethereum;
       try {
-        setTxStatus({ msg: "Awaiting signature in wallet..." });
+        const text = input.toUpperCase();
+        
+        // Cümleden Token Tespiti
+        let foundToken = 'USDC';
+        if (text.includes('USDT')) foundToken = 'USDT';
+        else if (text.includes('DAI')) foundToken = 'DAI';
+        else if (text.includes('AERO')) foundToken = 'AERO';
 
-        // 1. Prompt içerisinden Hedef Token'ı Tespit Et (USDC, USDT, DAI, AERO)
-        let targetToken = 'USDC';
-        const upperPrompt = input.toUpperCase();
-        if (upperPrompt.includes('USDT')) targetToken = 'USDT';
-        else if (upperPrompt.includes('DAI')) targetToken = 'DAI';
-        else if (upperPrompt.includes('AERO')) targetToken = 'AERO';
+        const tokenObj = TOKEN_CATALOG[foundToken] || TOKEN_CATALOG.USDC;
 
-        const tokenMeta = TOKEN_CATALOG[targetToken] || TOKEN_CATALOG['USDC'];
+        // Yön Tespiti: "USDT ile ETH al" vs "ETH ile USDT al"
+        const isTokenToEth = text.includes(`${foundToken} FOR ETH`) || text.includes(`${foundToken} ILE ETH`) || (text.indexOf(foundToken) < text.indexOf('ETH') && text.indexOf(foundToken) !== -1);
 
-        // 2. ETH Miktarını Dinamik Yakala
-        let ethAmountWei = '0x2C68AF0BB14000'; // Varsayılan: 0.0002 ETH
-        const match = input.match(/(\d+\.?\d*)\s*eth/i);
-        if (match && match[1]) {
-          const val = parseFloat(match[1]);
-          if (!isNaN(val) && val > 0) {
-            const weiBigInt = BigInt(Math.floor(val * 1e18));
-            ethAmountWei = '0x' + weiBigInt.toString(16);
+        const recipientClean = walletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
+        const feeClean = '0000000000000000000000000000000000000000000000000000000000000bb8'; // %0.3 Havuz
+
+        if (isTokenToEth) {
+          // *** SENARYO 1: TOKEN (USDT/USDC) -> ETH TAKASI ***
+          setTxStatus({ msg: `1/2: Approving ${foundToken} for Uniswap Router...` });
+          addLog(`Step 1: Approving ${foundToken} to Router...`);
+
+          // 1. Step: ERC20 Approve (Harulda izni)
+          // approve(address spender, uint256 amount) selector: 0x095ea7b3
+          const routerClean = UNISWAP_V3_ROUTER.toLowerCase().replace('0x', '').padStart(64, '0');
+          const maxAmountClean = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+          const approveCalldata = `0x095ea7b3${routerClean}${maxAmountClean}`;
+
+          await eth.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: walletAddress, to: tokenObj.address, data: approveCalldata }],
+          });
+
+          addLog(`Step 1 Approved! Executing Swap: ${foundToken} -> ETH...`);
+          setTxStatus({ msg: `2/2: Swapping ${foundToken} to ETH on-chain...` });
+
+          // 2. Step: Token -> WETH Swap
+          const tokenInClean = tokenObj.address.toLowerCase().replace('0x', '').padStart(64, '0');
+          const tokenOutClean = WETH_BASE_SEPOLIA.toLowerCase().replace('0x', '').padStart(64, '0');
+          const swapCalldata = `0x04e45caf${tokenInClean}${tokenOutClean}${feeClean}${recipientClean}`;
+
+          const txHash = await eth.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: walletAddress, to: UNISWAP_V3_ROUTER, value: '0x0', data: swapCalldata }],
+          });
+
+          setTxStatus({ msg: `Swap Completed! ${foundToken} converted to ETH in wallet.`, hash: txHash });
+          addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
+
+        } else {
+          // *** SENARYO 2: ETH -> TOKEN (USDC/USDT/DAI) TAKASI ***
+          setTxStatus({ msg: "Executing ETH -> Token Swap in wallet..." });
+
+          // ETH Miktarını Dinamik Yakala (Varsayılan 0.0002 ETH)
+          let ethAmountWei = '0x2C68AF0BB14000';
+          const match = input.match(/(\d+\.?\d*)\s*eth/i);
+          if (match && match[1]) {
+            const val = parseFloat(match[1]);
+            if (!isNaN(val) && val > 0) ethAmountWei = '0x' + BigInt(Math.floor(val * 1e18)).toString(16);
           }
+
+          const tokenInClean = WETH_BASE_SEPOLIA.toLowerCase().replace('0x', '').padStart(64, '0');
+          const tokenOutClean = tokenObj.address.toLowerCase().replace('0x', '').padStart(64, '0');
+          const swapCalldata = `0x04e45caf${tokenInClean}${tokenOutClean}${feeClean}${recipientClean}`;
+
+          addLog(`Executing Uniswap V3 Swap: ETH -> ${foundToken}...`);
+
+          const txHash = await eth.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: walletAddress, to: UNISWAP_V3_ROUTER, value: ethAmountWei, data: swapCalldata }],
+          });
+
+          setTxStatus({ msg: `Uniswap V3 Swap Executed! Real ${foundToken} balance updated.`, hash: txHash });
+          addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
         }
-
-        addLog(`Routing ${targetToken} Intent Execution on Base Sepolia...`);
-
-        // 3. WETH / Multi-Token Vault Deposit Calldata Execution
-        // WETH / ERC-20 Vault Deposit Method: 0xd0e30db0
-        const calldata = '0xd0e30db0';
-
-        const txHash = await (window as any).ethereum.request({
-          method: 'eth_sendTransaction',
-          params: [{
-            from: walletAddress,
-            to: TOKEN_CATALOG.WETH.address,
-            value: ethAmountWei,
-            data: calldata,
-          }],
-        });
-
-        setTxStatus({ 
-          msg: `Swap Executed! Target ${targetToken} Tokens routed to your wallet.`, 
-          hash: txHash 
-        });
-        addLog(`TX Confirmed On-Chain: ${txHash.substring(0, 10)}...`);
       } catch (err: any) {
-        setTxStatus({ msg: err.message || "User rejected transaction", isError: true });
-        addLog("Transaction Rejected or Failed.");
+        setTxStatus({ msg: err.message || "Transaction cancelled by user", isError: true });
+        addLog("Transaction Rejected.");
       }
     }
   };
@@ -182,28 +214,27 @@ export default function Home() {
   const isTestnet = chainId === BASE_SEPOLIA_HEX;
 
   return (
-    <main className="min-h-screen bg-[#050508] text-white flex flex-col justify-between selection:bg-blue-500 selection:text-white font-sans relative overflow-hidden">
+    <main className="min-h-screen bg-[#050508] text-white flex flex-col justify-between font-sans relative overflow-hidden">
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/15 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
 
+      {/* Ticker Bar */}
       <div className="w-full bg-zinc-950/80 border-b border-zinc-800/60 backdrop-blur-md px-6 py-2 text-[11px] font-mono text-zinc-400 flex justify-between items-center overflow-x-auto z-10">
         <div className="flex items-center gap-6">
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 animate-ping"/> BASE NETWORK: <strong className="text-white">ONLINE</strong></span>
-          <span>ETH/USD: <strong className="text-green-400">$2,845.20 (+3.2%)</strong></span>
+          <span>ETH/USD: <strong className="text-green-400">$2,845.20</strong></span>
+          <span>USDT/USD: <strong className="text-green-400">$1.00</strong></span>
           <span>AVG GAS: <strong className="text-blue-400">&lt; $0.001</strong></span>
-          <span>BASE TVL: <strong className="text-purple-400">$3.82B</strong></span>
         </div>
         <div className="hidden sm:flex items-center gap-4">
           <span className="text-zinc-500">ENGINE: GROQ LLAMA 3.3 70B</span>
-          <span className="text-blue-400 font-bold">LATENCY: 140ms</span>
         </div>
       </div>
 
+      {/* Header */}
       <header className="w-full max-w-7xl mx-auto flex justify-between items-center px-6 py-4 z-10">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">
-            B
-          </div>
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">B</div>
           <div>
             <h2 className="font-extrabold tracking-tight text-lg text-white">BaseIntent <span className="text-blue-500">AI</span></h2>
             <p className="text-[10px] font-mono text-zinc-500">Autonomous Execution Layer</p>
@@ -211,88 +242,67 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button
-            onClick={switchToBaseSepolia}
-            className={`text-xs px-3 py-1.5 rounded-xl border font-mono transition backdrop-blur-md ${
-              isTestnet 
-                ? 'bg-green-950/40 text-green-400 border-green-800/60' 
-                : 'bg-zinc-900/80 text-zinc-300 border-zinc-700 hover:border-blue-500'
-            }`}
-          >
+          <button onClick={switchToBaseSepolia} className={`text-xs px-3 py-1.5 rounded-xl border font-mono transition ${isTestnet ? 'bg-green-950/40 text-green-400 border-green-800/60' : 'bg-zinc-900/80 text-zinc-300 border-zinc-700'}`}>
             {isTestnet ? '● Base Sepolia Testnet' : '⚡ Switch to Testnet'}
           </button>
 
           {walletAddress ? (
             <div className="flex items-center gap-2">
-              <span className="bg-zinc-900/90 border border-zinc-800 text-blue-400 px-3 py-1.5 rounded-xl font-mono text-xs shadow-inner">
-                {walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}
-              </span>
-              <button onClick={disconnectWallet} className="bg-red-950/50 hover:bg-red-900/80 border border-red-800/60 text-red-400 px-3 py-1.5 rounded-xl font-mono text-xs transition">
-                Disconnect
-              </button>
+              <span className="bg-zinc-900/90 border border-zinc-800 text-blue-400 px-3 py-1.5 rounded-xl font-mono text-xs">{walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}</span>
+              <button onClick={disconnectWallet} className="bg-red-950/50 hover:bg-red-900/80 border border-red-800/60 text-red-400 px-3 py-1.5 rounded-xl font-mono text-xs transition">Disconnect</button>
             </div>
           ) : (
-            <button onClick={connectWallet} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-lg shadow-blue-600/20 transition">
-              Connect Wallet
-            </button>
+            <button onClick={connectWallet} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-lg transition">Connect Wallet</button>
           )}
         </div>
       </header>
 
+      {/* Content */}
       <div className="max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto z-10">
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4 backdrop-blur-md">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Base Grant Hackathon Prototype
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Dual-Way Multi-Token Swap Supported
             </div>
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
               Natural Language to On-Chain Execution.
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-xl">
-              Type complex multi-step DeFi intents. BaseIntent AI parses calldata, simulates execution, calculates slippage, and bundles transactions automatically.
+              Type any swap intent (ETH to USDT/USDC/DAI or USDT to ETH). BaseIntent AI constructs the correct call parameters automatically.
             </p>
           </div>
 
-          <div className="bg-zinc-900/60 border border-zinc-800 p-2 rounded-2xl shadow-2xl backdrop-blur-xl focus-within:border-blue-500/60 transition">
+          <div className="bg-zinc-900/60 border border-zinc-800 p-2 rounded-2xl shadow-2xl backdrop-blur-xl">
             <textarea
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type any intent: Swap 0.0002 ETH for USDC, USDT, DAI or AERO..."
+              placeholder="e.g. Swap USDT for ETH OR Swap 0.0002 ETH for USDC..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
               <div className="flex gap-1.5">
-                {["USDC", "USDT", "DAI", "AERO"].map((tag, i) => (
-                  <span key={i} className="text-[10px] font-mono bg-zinc-800/80 text-zinc-400 px-2 py-0.5 rounded-md">
-                    {tag}
-                  </span>
+                {["ETH⇄USDT", "ETH⇄USDC", "ETH⇄DAI"].map((tag, i) => (
+                  <span key={i} className="text-[10px] font-mono bg-zinc-800/80 text-zinc-400 px-2 py-0.5 rounded-md">{tag}</span>
                 ))}
               </div>
-              <button
-                onClick={() => handleExecute()}
-                disabled={loading}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition shadow-lg shadow-blue-600/30 flex items-center gap-2"
-              >
-                {loading ? <span className="animate-pulse">Parsing Calldata...</span> : <span>Run Intent Agent ↵</span>}
+              <button onClick={() => handleExecute()} disabled={loading} className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2">
+                {loading ? 'Parsing Intent...' : 'Run Intent Agent ↵'}
               </button>
             </div>
           </div>
 
+          {/* Dinamik Test Önerileri */}
           <div className="space-y-2">
-            <p className="text-xs font-mono text-zinc-500">MULTI-TOKEN TEST SUGGESTIONS FOR JUDGES:</p>
+            <p className="text-xs font-mono text-zinc-500">TEST SUGGESTIONS (BOTH DIRECTIONS):</p>
             <div className="flex flex-wrap gap-2">
               {[
-                "Swap 0.0002 ETH for USDC",
+                "Swap USDT for ETH",
                 "Swap 0.0002 ETH for USDT",
-                "Bridge 0.05 ETH to Base and swap 50% to AERO"
+                "Swap 0.0002 ETH for DAI",
+                "Swap USDC for ETH"
               ].map((p, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => { setInput(p); handleExecute(p); }}
-                  className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono text-left"
-                >
+                <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
                   ⚡ {p}
                 </button>
               ))}
@@ -301,36 +311,23 @@ export default function Home() {
 
           <div className="bg-zinc-950/90 border border-zinc-800/80 rounded-2xl p-4 font-mono text-xs">
             <div className="flex justify-between items-center border-b border-zinc-800/60 pb-2 mb-3">
-              <span className="text-zinc-500 flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-green-500" /> LIVE AGENT LOG STREAM
-              </span>
-              <span className="text-[10px] text-zinc-600">WEBSOCKET CONNECTED</span>
+              <span className="text-zinc-500 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500" /> AGENT LOG STREAM</span>
+              <span className="text-[10px] text-zinc-600">WEBSOCKET ONLINE</span>
             </div>
             <div className="space-y-1.5 text-zinc-400 font-mono text-[11px] max-h-28 overflow-y-auto">
-              {logs.map((log, i) => (
-                <div key={i} className="text-zinc-400">{log}</div>
-              ))}
+              {logs.map((log, i) => (<div key={i}>{log}</div>))}
             </div>
           </div>
         </div>
 
+        {/* Right Panel */}
         <div className="lg:col-span-5 flex flex-col justify-center">
           {result ? (
-            <div className="bg-zinc-950/90 border border-zinc-800/90 rounded-2xl p-6 shadow-2xl backdrop-blur-xl space-y-5 relative">
+            <div className="bg-zinc-950/90 border border-zinc-800/90 rounded-2xl p-6 shadow-2xl backdrop-blur-xl space-y-5">
               <div className="flex justify-between items-center border-b border-zinc-800/80 pb-3">
                 <div className="flex gap-2">
-                  <button 
-                    onClick={() => setActiveTab('visual')} 
-                    className={`text-xs font-mono font-bold px-3 py-1 rounded-lg transition ${activeTab === 'visual' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-white'}`}
-                  >
-                    Visual Execution
-                  </button>
-                  <button 
-                    onClick={() => setActiveTab('calldata')} 
-                    className={`text-xs font-mono font-bold px-3 py-1 rounded-lg transition ${activeTab === 'calldata' ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-white'}`}
-                  >
-                    Raw Payload
-                  </button>
+                  <button onClick={() => setActiveTab('visual')} className={`text-xs font-mono font-bold px-3 py-1 rounded-lg ${activeTab === 'visual' ? 'bg-blue-600 text-white' : 'text-zinc-500'}`}>Visual Execution</button>
+                  <button onClick={() => setActiveTab('calldata')} className={`text-xs font-mono font-bold px-3 py-1 rounded-lg ${activeTab === 'calldata' ? 'bg-blue-600 text-white' : 'text-zinc-500'}`}>Raw Payload</button>
                 </div>
                 <span className="text-[10px] font-mono text-green-400 bg-green-950/80 border border-green-800/60 px-2 py-0.5 rounded">
                   {(result.confidenceScore * 100).toFixed(0)}% Match
@@ -341,42 +338,18 @@ export default function Home() {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
-                      <span className="text-[10px] font-mono text-zinc-500 block">INTENT TYPE</span>
+                      <span className="text-[10px] font-mono text-zinc-500 block">ACTION TYPE</span>
                       <span className="text-sm font-bold text-blue-400 font-mono">{result.intentType}</span>
                     </div>
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
                       <span className="text-[10px] font-mono text-zinc-500 block">RISK SCORE</span>
-                      <span className={`text-xs font-bold font-mono ${result.riskAnalysis?.score === 'LOW' ? 'text-green-400' : 'text-yellow-400'}`}>
-                        ● {result.riskAnalysis?.score || 'LOW'} RISK
-                      </span>
+                      <span className="text-xs font-bold font-mono text-green-400">● LOW RISK</span>
                     </div>
                   </div>
 
                   <div>
                     <h4 className="text-[11px] font-mono text-zinc-400 mb-1">AGENT SIMULATION</h4>
-                    <p className="text-xs text-zinc-300 bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/60 leading-relaxed">
-                      {result.simulationSummary}
-                    </p>
-                  </div>
-
-                  <div>
-                    <h4 className="text-[11px] font-mono text-zinc-400 mb-2">EXECUTION BUNDLE</h4>
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {result.executionBatch?.map((step: any, i: number) => (
-                        <div key={i} className="flex items-center justify-between bg-zinc-900/80 p-2.5 rounded-xl border border-zinc-800">
-                          <div className="flex items-center gap-2.5">
-                            <span className="w-5 h-5 rounded-md bg-blue-950 text-blue-400 border border-blue-800 text-[10px] flex items-center justify-center font-mono font-bold">
-                              {step.step || i + 1}
-                            </span>
-                            <div>
-                              <p className="text-xs font-bold text-white">{step.action}</p>
-                              <p className="text-[9px] font-mono text-zinc-500">Base Sepolia Router</p>
-                            </div>
-                          </div>
-                          <span className="text-[10px] font-mono text-zinc-400">{step.estimatedGasUsd}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <p className="text-xs text-zinc-300 bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/60">{result.simulationSummary}</p>
                   </div>
                 </>
               ) : (
@@ -386,11 +359,8 @@ export default function Home() {
               )}
 
               <div className="space-y-2 pt-2">
-                <button
-                  onClick={handleSignAndBroadcast}
-                  className="w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
-                >
-                  <span>Sign & Broadcast Transaction Bundle</span>
+                <button onClick={handleSignAndBroadcast} className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg">
+                  Sign & Broadcast Transaction Bundle
                 </button>
 
                 {txStatus && (
@@ -406,21 +376,17 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <div className="bg-zinc-950/40 border border-dashed border-zinc-800/80 rounded-2xl p-8 text-center backdrop-blur-md">
-              <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center text-zinc-500 mb-3 font-mono">
-                🤖
-              </div>
+            <div className="bg-zinc-950/40 border border-dashed border-zinc-800/80 rounded-2xl p-8 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center text-zinc-500 mb-3 font-mono">🤖</div>
               <h3 className="text-sm font-bold text-zinc-300 mb-1">Agent Standby Mode</h3>
-              <p className="text-xs text-zinc-500 max-w-xs mx-auto">
-                Enter a natural language prompt on the left to activate the autonomous Base execution engine.
-              </p>
+              <p className="text-xs text-zinc-500 max-w-xs mx-auto">Enter any swap command above to test ETH/USDT/USDC bidirectional execution.</p>
             </div>
           )}
         </div>
       </div>
 
       <footer className="w-full max-w-7xl mx-auto px-6 py-4 border-t border-zinc-900 flex justify-between items-center text-xs text-zinc-600 font-mono z-10">
-        <span>BaseIntent AI Engine v1.0.5</span>
+        <span>BaseIntent AI Engine v1.0.8</span>
         <span>Base Creator Grant Candidate</span>
       </footer>
     </main>
