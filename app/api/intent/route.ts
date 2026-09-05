@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther, parseUnits } from 'viem';
 
+// Base Mainnet Popüler Token Adresleri
 const BASE_TOKENS: Record<string, { address: string; fee: number; decimals: number }> = {
   ETH:  { address: '0x4200000000000000000000000000000000000006', fee: 500, decimals: 18 },
   WETH: { address: '0x4200000000000000000000000000000000000006', fee: 500, decimals: 18 },
@@ -42,38 +43,61 @@ const SWAP_ROUTER_ABI = [
 ] as const;
 
 function parsePromptDirectly(prompt: string) {
-  const p = prompt.toLowerCase();
+  const p = prompt.toUpperCase();
   
-  // Miktar bul
-  const amountMatch = p.match(/(\d+(\.\d+)?)/);
-  const rawAmount = amountMatch ? parseFloat(amountMatch[0]) : 0.0001;
+  // Tutar Tespiti
+  const amountMatch = prompt.match(/(\d+(\.\d+)?)/);
+  let rawAmount = amountMatch ? parseFloat(amountMatch[0]) : 0.0001;
 
-  // "1 usdc buy with eth" -> TokenIn: ETH, TokenOut: USDC, Ama miktar ne?
-  // Eğer prompt'ta '0.0001 eth' gibi açık belirtilmediyse, güvenli mikro tutarlar belirlenir.
+  // Desteklenen tokenlar listesi
+  const tokens = ['ETH', 'USDC', 'USDT', 'DAI', 'AERO'];
+  
   let sellToken = 'ETH';
   let buyToken = 'USDC';
 
-  if (p.includes('usdc') && (p.includes('buy with eth') || p.includes('for eth') || p.includes('eth to usdc') || p.includes('swap eth'))) {
-    sellToken = 'ETH';
-    buyToken = 'USDC';
-  } else if (p.includes('eth') && (p.includes('buy with usdc') || p.includes('usdc to eth') || p.includes('for usdc'))) {
-    sellToken = 'USDC';
-    buyToken = 'ETH';
+  // Prompt içinden satılan ve alınan tokenı bul
+  const foundTokens = tokens.filter(t => p.includes(t));
+
+  if (foundTokens.length >= 2) {
+    // "Swap ETH for USDT" veya "10 USDT buy with ETH"
+    if (p.includes('FOR') || p.includes('TO') || p.includes('INTO')) {
+      // Örn: "ETH FOR USDT" -> sell: ETH, buy: USDT
+      const parts = p.split(/FOR|TO|INTO/);
+      const leftToken = tokens.find(t => parts[0].includes(t));
+      const rightToken = tokens.find(t => parts[1]?.includes(t));
+      if (leftToken) sellToken = leftToken;
+      if (rightToken) buyToken = rightToken;
+    } else if (p.includes('BUY') || p.includes('GET')) {
+      // Örn: "USDT BUY WITH ETH" -> sell: ETH, buy: USDT
+      const buyIndex = p.indexOf('BUY') !== -1 ? p.indexOf('BUY') : p.indexOf('GET');
+      const targetToken = tokens.find(t => p.indexOf(t) < buyIndex);
+      const payToken = tokens.find(t => p.indexOf(t) > buyIndex);
+      if (payToken) sellToken = payToken;
+      if (targetToken) buyToken = targetToken;
+    } else {
+      sellToken = foundTokens[0];
+      buyToken = foundTokens[1];
+    }
+  } else if (foundTokens.length === 1) {
+    if (foundTokens[0] === 'ETH') {
+      sellToken = 'ETH';
+      buyToken = 'USDC';
+    } else {
+      sellToken = 'ETH';
+      buyToken = foundTokens[0];
+    }
   }
 
-  // Güvenlik Limiti: Eğer ETH satılıyorsa ve miktar 0.01'den büyükse yanlış anlamayı önlemek için 0.0001 ETH'ye sabitle!
-  let safeAmountStr = rawAmount.toString();
+  // Güvenlik Limiti (Kullanıcı yanlışlıkla 1 ETH yazarsa 0.0001'e çek)
   if (sellToken === 'ETH' && rawAmount > 0.005) {
-    safeAmountStr = '0.0001'; // Güvenlik çemberi! 1 ETH çekmesini engeller.
-  } else if (sellToken === 'USDC' && rawAmount > 10) {
-    safeAmountStr = '1';
+    rawAmount = 0.0001;
   }
 
   return {
     intentType: 'SWAP',
     sellToken,
     buyToken,
-    amount: safeAmountStr,
+    amount: rawAmount.toString(),
     confidenceScore: 0.99
   };
 }
@@ -91,7 +115,7 @@ export async function POST(req: Request) {
     const sellTokenObj = BASE_TOKENS[intent.sellToken] || BASE_TOKENS.ETH;
     const buyTokenObj = BASE_TOKENS[intent.buyToken] || BASE_TOKENS.USDC;
 
-    // Decimal çevrimi
+    // Decimal Hesaplaması
     const sellAmountWei = intent.sellToken === 'ETH' 
       ? parseEther(intent.amount) 
       : parseUnits(intent.amount, sellTokenObj.decimals);
