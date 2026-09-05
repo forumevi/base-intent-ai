@@ -23,6 +23,14 @@ export default function Home() {
 
   const isSepolia = currentChainId === 84532;
 
+  const handleConnectWallet = () => {
+    if (connectors && connectors.length > 0) {
+      connect({ connector: connectors[0] });
+    } else {
+      alert('No Web3 wallet extension found! Please install MetaMask or Rabby Wallet.');
+    }
+  };
+
   useEffect(() => {
     if (isConnected && address) {
       setAgentLogs((prev) => [
@@ -38,7 +46,7 @@ export default function Home() {
     if (!activePrompt) return;
 
     if (!isConnected) {
-      alert('Please connect your Base-compatible Web3 wallet first!');
+      handleConnectWallet();
       return;
     }
 
@@ -53,7 +61,6 @@ export default function Home() {
     ]);
 
     try {
-      // Step 1: AI Routing
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,7 +80,6 @@ export default function Home() {
         ...prev
       ]);
 
-      // Step 2: On-Chain Execution
       const txHash = await sendTransactionAsync({
         to: txData.to as `0x${string}`,
         data: txData.data as `0x${string}`,
@@ -107,11 +113,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#030407] text-slate-100 flex flex-col items-center p-4 md:p-8 relative overflow-hidden font-sans selection:bg-blue-500 selection:text-white">
       
-      {/* GLOW BACKGROUND EFEKTLERİ */}
       <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-blue-600/15 blur-[140px] pointer-events-none rounded-full" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[300px] bg-indigo-600/10 blur-[120px] pointer-events-none rounded-full" />
 
-      {/* BASE CREATOR GRANT / ENVIRONMENT SAFETY BANNER */}
       <div className="w-full max-w-4xl z-10 mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-2xl bg-gradient-to-r from-blue-950/40 via-slate-900/60 to-slate-950/40 border border-blue-500/20 backdrop-blur-xl shadow-[0_0_25px_rgba(0,82,255,0.08)]">
         <div className="flex items-center gap-3">
           <span className="px-2.5 py-1 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-400 font-mono text-[10px] font-bold tracking-wider uppercase">
@@ -127,13 +131,12 @@ export default function Home() {
             const targetChainId = isSepolia ? 8453 : 84532;
             switchChain?.({ chainId: targetChainId });
           }}
-          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 rounded-xl text-[11px] border border-slate-700 text-slate-300 transition font-mono"
+          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 rounded-xl text-[11px] border border-slate-700 text-slate-300 transition font-mono cursor-pointer"
         >
           {isSepolia ? "Switch to Mainnet 🚀" : "Switch to Sepolia 🧪"}
         </button>
       </div>
 
-      {/* TOP COMMAND HEADER */}
       <div className="w-full max-w-4xl z-10 flex items-center justify-between py-4 px-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-2xl mb-8 shadow-2xl">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-sm shadow-[0_0_15px_rgba(0,82,255,0.5)]">
@@ -150,7 +153,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* WALLET BUTTON */}
         {isConnected ? (
           <div className="flex items-center gap-3">
             <div className="hidden sm:flex flex-col text-right font-mono text-[11px]">
@@ -159,25 +161,23 @@ export default function Home() {
             </div>
             <button 
               onClick={() => disconnect()}
-              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-2 rounded-xl border border-red-500/30 transition font-mono"
+              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-2 rounded-xl border border-red-500/30 transition font-mono cursor-pointer"
             >
               Disconnect
             </button>
           </div>
         ) : (
           <button 
-            onClick={() => connect({ connector: connectors[0] })}
-            className="text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl transition shadow-[0_0_20px_rgba(0,82,255,0.4)] font-mono"
+            onClick={handleConnectWallet}
+            className="text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl transition shadow-[0_0_20px_rgba(0,82,255,0.4)] font-mono cursor-pointer active:scale-95"
           >
             Connect Wallet 🔒
           </button>
         )}
       </div>
 
-      {/* MAIN CONTAINER */}
       <div className="max-w-2xl w-full z-10 space-y-6">
         
-        {/* HERO TITLE */}
         <div className="text-center space-y-3">
           <h1 className="text-3xl md:text-5xl font-black tracking-tight text-white leading-tight">
             Autonomous <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">DeFi Intents</span> on Base
@@ -187,7 +187,6 @@ export default function Home() {
           </p>
         </div>
 
-        {/* VISUAL AI PIPELINE ANIMATION */}
         <div className="grid grid-cols-3 gap-2 p-3 bg-slate-950/60 border border-slate-800/80 rounded-2xl backdrop-blur-md text-[11px] font-mono">
           <div className={`p-2 rounded-xl border text-center transition-all ${
             activeStep >= 1 ? 'bg-blue-600/20 border-blue-500 text-blue-300 shadow-[0_0_10px_rgba(0,82,255,0.2)]' : 'bg-slate-900/40 border-slate-800 text-slate-500'
@@ -206,7 +205,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* PROMPT INTERACTION TERMINAL */}
         <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] space-y-4">
           <div className="relative">
             <textarea
@@ -217,27 +215,26 @@ export default function Home() {
             />
             <button
               onClick={() => handleRunAgent()}
-              disabled={loading || !isConnected}
-              className="absolute bottom-3 right-3 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs rounded-xl shadow-[0_0_15px_rgba(0,82,255,0.4)] disabled:opacity-40 transition font-mono"
+              disabled={loading}
+              className="absolute bottom-3 right-3 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs rounded-xl shadow-[0_0_15px_rgba(0,82,255,0.4)] disabled:opacity-40 transition font-mono cursor-pointer"
             >
               {loading ? 'Executing AI Pipeline...' : isConnected ? 'Execute Intent ⚡' : 'Connect Wallet 🔒'}
             </button>
           </div>
 
-          {/* ONE-CLICK INTENT PRESETS */}
           <div className="space-y-1.5">
             <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Suggested Base Intents</span>
             <div className="grid grid-cols-2 gap-2 text-xs">
               <button
                 onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
-                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between"
+                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 Swap 0.0001 ETH ➔ USDC</span>
                 <span className="opacity-0 group-hover:opacity-100 text-blue-400 transition">↗</span>
               </button>
               <button
                 onClick={() => setPrompt('Swap 1 USDC for ETH')}
-                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between"
+                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 Swap 1 USDC ➔ ETH</span>
                 <span className="opacity-0 group-hover:opacity-100 text-blue-400 transition">↗</span>
@@ -246,7 +243,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* ON-CHAIN PROOF CARD */}
         {lastTxHash && (
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono flex items-center justify-between shadow-[0_0_20px_rgba(16,185,129,0.15)] animate-fade-in">
             <div className="flex items-center gap-2">
@@ -264,7 +260,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* TELEMETRY CONSOLE */}
         <div className="bg-[#020305] border border-slate-800/80 rounded-2xl p-4 font-mono text-xs text-slate-400 space-y-2 shadow-2xl">
           <div className="text-slate-500 border-b border-slate-800/80 pb-2 flex justify-between items-center text-[11px]">
             <span className="flex items-center gap-2">
