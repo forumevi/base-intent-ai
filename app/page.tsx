@@ -1,30 +1,62 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { encodeFunctionData, parseEther, parseUnits } from 'viem';
+import { encodeFunctionData, parseEther } from 'viem';
 
-const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
+// Ağ Yapılandırmaları
+const NETWORKS = {
+  MAINNET: {
+    hex: '0x2105', // 8453
+    name: 'Base Mainnet',
+    rpc: 'https://mainnet.base.org',
+    explorer: 'https://basescan.org',
+    router: '0x26266B0c62803AcD10c53A9008272fB560EFdC05', // Uniswap V3 SwapRouter02
+    tokens: {
+      USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', fee: 500 },
+      USDT: { address: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839', fee: 100 },
+      DAI:  { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', fee: 100 },
+      AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', fee: 3000 },
+      WETH: { address: '0x4200000000000000000000000000000000000006', fee: 500 }
+    }
+  },
+  SEPOLIA: {
+    hex: '0x14a34', // 84532
+    name: 'Base Sepolia Testnet',
+    rpc: 'https://sepolia.base.org',
+    explorer: 'https://base-sepolia.blockscout.com',
+    weth: '0x4200000000000000000000000000000000000006'
+  }
+};
 
-// Base Sepolia Testnet Doğrulanmış Kontratlar
-const WETH_ADDRESS = '0x4200000000000000000000000000000000000006';
-const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+const SWAP_ROUTER_ABI = [
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'tokenIn', type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'recipient', type: 'address' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'amountOutMinimum', type: 'uint256' },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' }
+        ],
+        name: 'params',
+        type: 'tuple'
+      }
+    ],
+    name: 'exactInputSingle',
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    stateMutability: 'payable',
+    type: 'function'
+  }
+] as const;
 
-// WETH Deposit/Transfer ABI (Garanti Başarılı Testnet İşlemi İçin)
 const WETH_ABI = [
   {
     inputs: [],
     name: 'deposit',
     outputs: [],
     stateMutability: 'payable',
-    type: 'function'
-  },
-  {
-    inputs: [
-      { name: 'to', type: 'address' },
-      { name: 'value', type: 'uint256' }
-    ],
-    name: 'transfer',
-    outputs: [{ name: '', type: 'bool' }],
-    stateMutability: 'nonpayable',
     type: 'function'
   }
 ] as const;
@@ -35,12 +67,13 @@ export default function Home() {
   const [result, setResult] = useState<any>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [chainId, setChainId] = useState<string | null>(null);
+  const [selectedNetwork, setSelectedNetwork] = useState<'MAINNET' | 'SEPOLIA'>('SEPOLIA');
   const [txStatus, setTxStatus] = useState<{ msg: string; hash?: string; isError?: boolean } | null>(null);
   const [activeTab, setActiveTab] = useState<'visual' | 'calldata'>('visual');
 
   const [logs, setLogs] = useState<string[]>([
-    "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "Base Intent Native Router Active"
+    "System Initialized: Base Intent Native Router Active",
+    "Select Network Mode: Base Mainnet or Sepolia Testnet"
   ]);
 
   const addLog = (msg: string) => {
@@ -54,7 +87,12 @@ export default function Home() {
       eth.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
         if (accounts.length > 0) setWalletAddress(accounts[0]);
       });
-      eth.request({ method: 'eth_chainId' }).then((id: string) => setChainId(id?.toLowerCase()));
+      eth.request({ method: 'eth_chainId' }).then((id: string) => {
+        const hex = id?.toLowerCase();
+        setChainId(hex);
+        if (hex === NETWORKS.SEPOLIA.hex) setSelectedNetwork('SEPOLIA');
+        else if (hex === NETWORKS.MAINNET.hex) setSelectedNetwork('MAINNET');
+      });
       eth.on('accountsChanged', (accs: string[]) => setWalletAddress(accs.length > 0 ? accs[0] : null));
       eth.on('chainChanged', (id: string) => setChainId(id?.toLowerCase()));
     }
@@ -74,27 +112,24 @@ export default function Home() {
     }
   };
 
-  const disconnectWallet = () => {
-    setWalletAddress(null);
-    setTxStatus(null);
-    addLog("Wallet Disconnected.");
-  };
-
-  const switchToBaseSepolia = async () => {
+  const switchNetwork = async (targetNetwork: 'MAINNET' | 'SEPOLIA') => {
+    setSelectedNetwork(targetNetwork);
+    const config = NETWORKS[targetNetwork];
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       const eth = (window as any).ethereum;
       try {
-        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_SEPOLIA_HEX }] });
+        await eth.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: config.hex }] });
+        addLog(`Switched network to ${config.name}`);
       } catch (err: any) {
         if (err.code === 4902 || err.code === -32603) {
           await eth.request({
             method: 'wallet_addEthereumChain',
             params: [{
-              chainId: BASE_SEPOLIA_HEX,
-              chainName: 'Base Sepolia Testnet',
+              chainId: config.hex,
+              chainName: config.name,
               nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
-              rpcUrls: ['https://sepolia.base.org'],
-              blockExplorerUrls: ['https://sepolia.basescan.org'],
+              rpcUrls: [config.rpc],
+              blockExplorerUrls: [config.explorer],
             }],
           });
         }
@@ -136,44 +171,91 @@ export default function Home() {
       await connectWallet();
       return;
     }
-    if (chainId !== BASE_SEPOLIA_HEX) {
-      await switchToBaseSepolia();
+
+    const currentConfig = NETWORKS[selectedNetwork];
+    if (chainId !== currentConfig.hex) {
+      await switchNetwork(selectedNetwork);
       return;
     }
 
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       const eth = (window as any).ethereum;
       try {
-        setTxStatus({ msg: 'Broadcasting Intent Bundle on Base Sepolia...' });
-
         let rawEth = '0.0001';
         const match = input.match(/(\d+\.?\d*)\s*eth/i);
         if (match && match[1]) rawEth = match[1];
 
         const ethWei = parseEther(rawEth);
 
-        // Native WETH Wrapping (Base Sepolia üzerinde %100 Başarılı On-Chain İşlem)
-        const depositCalldata = encodeFunctionData({
-          abi: WETH_ABI,
-          functionName: 'deposit',
-          args: []
-        });
+        if (selectedNetwork === 'MAINNET') {
+          // --- BASE MAINNET REAL UNISWAP SWAP ---
+          const text = input.toUpperCase();
+          let targetToken = 'USDC';
+          if (text.includes('USDT')) targetToken = 'USDT';
+          else if (text.includes('DAI')) targetToken = 'DAI';
+          else if (text.includes('AERO')) targetToken = 'AERO';
 
-        const txHash = await eth.request({
-          method: 'eth_sendTransaction',
-          params: [{
-            from: walletAddress,
-            to: WETH_ADDRESS,
-            value: `0x${ethWei.toString(16)}`,
-            data: depositCalldata,
-          }],
-        });
+          const tokenObj = NETWORKS.MAINNET.tokens[targetToken as keyof typeof NETWORKS.MAINNET.tokens];
+          const wethAddress = NETWORKS.MAINNET.tokens.WETH.address;
 
-        setTxStatus({ 
-          msg: `Swap Executed Successfully! Tokens Routed on Base.`, 
-          hash: txHash 
-        });
-        addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
+          setTxStatus({ msg: `Executing Real Swap on Base Mainnet: ETH -> ${targetToken}...` });
+
+          const swapCalldata = encodeFunctionData({
+            abi: SWAP_ROUTER_ABI,
+            functionName: 'exactInputSingle',
+            args: [{
+              tokenIn: wethAddress as `0x${string}`,
+              tokenOut: tokenObj.address as `0x${string}`,
+              fee: tokenObj.fee,
+              recipient: walletAddress as `0x${string}`,
+              amountIn: ethWei,
+              amountOutMinimum: BigInt(0),
+              sqrtPriceLimitX96: BigInt(0)
+            }]
+          });
+
+          const txHash = await eth.request({
+            method: 'eth_sendTransaction',
+            params: [{
+              from: walletAddress,
+              to: NETWORKS.MAINNET.router,
+              value: `0x${ethWei.toString(16)}`,
+              data: swapCalldata,
+            }],
+          });
+
+          setTxStatus({ 
+            msg: `Mainnet Swap Successful! Bought ${targetToken}.`, 
+            hash: txHash 
+          });
+          addLog(`Mainnet TX Confirmed: ${txHash.substring(0, 10)}...`);
+
+        } else {
+          // --- BASE SEPOLIA TESTNET SAFE ROUTE ---
+          setTxStatus({ msg: `Executing Testnet Intent Routing on Base Sepolia...` });
+
+          const depositCalldata = encodeFunctionData({
+            abi: WETH_ABI,
+            functionName: 'deposit',
+            args: []
+          });
+
+          const txHash = await eth.request({
+            method: 'eth_sendTransaction',
+            params: [{
+              from: walletAddress,
+              to: NETWORKS.SEPOLIA.weth,
+              value: `0x${ethWei.toString(16)}`,
+              data: depositCalldata,
+            }],
+          });
+
+          setTxStatus({ 
+            msg: `Testnet Execution Confirmed! Tokens Routed on Sepolia.`, 
+            hash: txHash 
+          });
+          addLog(`Sepolia TX Confirmed: ${txHash.substring(0, 10)}...`);
+        }
 
       } catch (err: any) {
         console.error(err);
@@ -183,24 +265,29 @@ export default function Home() {
     }
   };
 
-  const isTestnet = chainId === BASE_SEPOLIA_HEX;
+  const currentExplorer = NETWORKS[selectedNetwork].explorer;
 
   return (
     <main className="min-h-screen bg-[#050508] text-white flex flex-col justify-between font-sans relative overflow-hidden">
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/15 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
 
+      {/* Top Banner Status */}
       <div className="w-full bg-zinc-950/80 border-b border-zinc-800/60 backdrop-blur-md px-6 py-2 text-[11px] font-mono text-zinc-400 flex justify-between items-center overflow-x-auto z-10">
         <div className="flex items-center gap-6">
-          <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 animate-ping"/> BASE NETWORK: <strong className="text-white">ONLINE</strong></span>
+          <span className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full animate-ping ${selectedNetwork === 'MAINNET' ? 'bg-red-500' : 'bg-green-400'}`}/> 
+            NETWORK: <strong className={selectedNetwork === 'MAINNET' ? 'text-red-400 font-bold' : 'text-white'}>{NETWORKS[selectedNetwork].name.toUpperCase()}</strong>
+          </span>
           <span>ETH/USD: <strong className="text-green-400">$2,845.20</strong></span>
-          <span>AVG GAS: <strong className="text-blue-400">&lt; $0.001</strong></span>
+          <span>AVG GAS: <strong className="text-blue-400">&lt; $0.005</strong></span>
         </div>
         <div className="hidden sm:flex items-center gap-4">
           <span className="text-zinc-500">ENGINE: GROQ LLAMA 3.3 70B</span>
         </div>
       </div>
 
+      {/* Header */}
       <header className="w-full max-w-7xl mx-auto flex justify-between items-center px-6 py-4 z-10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">B</div>
@@ -211,14 +298,24 @@ export default function Home() {
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={switchToBaseSepolia} className={`text-xs px-3 py-1.5 rounded-xl border font-mono transition ${isTestnet ? 'bg-green-950/40 text-green-400 border-green-800/60' : 'bg-zinc-900/80 text-zinc-300 border-zinc-700'}`}>
-            {isTestnet ? '● Base Sepolia Testnet' : '⚡ Switch to Testnet'}
-          </button>
+          {/* Network Switcher Toggle */}
+          <div className="flex bg-zinc-900 border border-zinc-800 p-1 rounded-xl font-mono text-xs">
+            <button 
+              onClick={() => switchNetwork('MAINNET')} 
+              className={`px-3 py-1.5 rounded-lg transition flex items-center gap-1.5 ${selectedNetwork === 'MAINNET' ? 'bg-red-600 text-white font-extrabold shadow-lg shadow-red-600/30' : 'text-zinc-400 hover:text-white'}`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" /> Base Mainnet
+            </button>
+            <button 
+              onClick={() => switchNetwork('SEPOLIA')} 
+              className={`px-3 py-1.5 rounded-lg transition ${selectedNetwork === 'SEPOLIA' ? 'bg-indigo-600 text-white font-bold' : 'text-zinc-400 hover:text-white'}`}>
+              Sepolia Testnet
+            </button>
+          </div>
 
           {walletAddress ? (
             <div className="flex items-center gap-2">
               <span className="bg-zinc-900/90 border border-zinc-800 text-blue-400 px-3 py-1.5 rounded-xl font-mono text-xs">{walletAddress.substring(0, 6)}...{walletAddress.substring(walletAddress.length - 4)}</span>
-              <button onClick={disconnectWallet} className="bg-red-950/50 hover:bg-red-900/80 border border-red-800/60 text-red-400 px-3 py-1.5 rounded-xl font-mono text-xs transition">Disconnect</button>
+              <button onClick={() => setWalletAddress(null)} className="bg-red-950/50 hover:bg-red-900/80 border border-red-800/60 text-red-400 px-3 py-1.5 rounded-xl font-mono text-xs transition">Disconnect</button>
             </div>
           ) : (
             <button onClick={connectWallet} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-lg transition">Connect Wallet</button>
@@ -226,17 +323,38 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto z-10">
+      {/* Main Container */}
+      <div className="max-w-7xl w-full mx-auto px-6 py-4 grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto z-10">
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Native Intent Router
+          
+          {/* 🚨 BÜYÜK MAINNET RISK VE UYARI PANELI 🚨 */}
+          {selectedNetwork === 'MAINNET' ? (
+            <div className="bg-red-950/70 border-2 border-red-600/90 rounded-2xl p-4 shadow-2xl shadow-red-900/30 backdrop-blur-md animate-pulse">
+              <div className="flex items-start gap-3">
+                <span className="text-2xl">🚨</span>
+                <div>
+                  <h3 className="font-extrabold text-sm text-red-400 font-mono tracking-wide uppercase flex items-center gap-2">
+                    DİKKAT: CANLI AĞDASINIZ (BASE MAINNET)
+                  </h3>
+                  <p className="text-xs text-red-200/90 leading-relaxed mt-1 font-sans">
+                    Gerçek kripto varlıklar kullanılarak işlem yapılacaktır. Başlatacağınız her takas işlemi <strong>gerçek ETH ve bakiyenizden eksilme yapacaktır.</strong> Lütfen tutarları kontrol edin.
+                  </p>
+                </div>
+              </div>
             </div>
+          ) : (
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono w-fit">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> 
+              Mode: Safe Testnet Environment (Sepolia)
+            </div>
+          )}
+
+          <div>
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
               Natural Language to On-Chain Execution.
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-xl">
-              Swap ETH for USDC, USDT or DAI seamlessly with autonomous AI Intent routing on Base.
+              Write plain text intents to swap tokens on Base Mainnet or Sepolia Testnet effortlessly.
             </p>
           </div>
 
@@ -245,7 +363,7 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap 0.0001 ETH for USDC..."
+              placeholder="e.g. 0.0001 eth boz usdt al or Swap 0.0001 ETH for USDC..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
@@ -261,12 +379,12 @@ export default function Home() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-mono text-zinc-500">TEST INTENTS:</p>
+            <p className="text-xs font-mono text-zinc-500">QUICK INTENTS:</p>
             <div className="flex flex-wrap gap-2">
               {[
+                "0.0001 eth boz usdt al",
                 "Swap 0.0001 ETH for USDC",
-                "Swap 0.0001 ETH for DAI",
-                "Swap 0.0001 ETH for USDT"
+                "0.0001 eth boz dai yap"
               ].map((p, idx) => (
                 <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
                   ⚡ {p}
@@ -307,8 +425,10 @@ export default function Home() {
                       <span className="text-sm font-bold text-blue-400 font-mono">{result.intentType}</span>
                     </div>
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
-                      <span className="text-[10px] font-mono text-zinc-500 block">RISK SCORE</span>
-                      <span className="text-xs font-bold font-mono text-green-400">● LOW RISK</span>
+                      <span className="text-[10px] font-mono text-zinc-500 block">TARGET NETWORK</span>
+                      <span className={`text-xs font-bold font-mono ${selectedNetwork === 'MAINNET' ? 'text-red-400' : 'text-indigo-400'}`}>
+                        {NETWORKS[selectedNetwork].name}
+                      </span>
                     </div>
                   </div>
 
@@ -324,16 +444,23 @@ export default function Home() {
               )}
 
               <div className="space-y-2 pt-2">
-                <button onClick={handleSignAndBroadcast} className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-xs transition shadow-lg">
-                  Sign & Broadcast Transaction Bundle
+                {/* DİKKAT ÇEKİCİ İMZALAMA BUTONU */}
+                <button 
+                  onClick={handleSignAndBroadcast} 
+                  className={`w-full py-3.5 font-bold rounded-xl text-xs transition shadow-lg flex items-center justify-center gap-2 ${
+                    selectedNetwork === 'MAINNET' 
+                      ? 'bg-gradient-to-r from-red-600 via-orange-600 to-red-600 hover:from-red-500 hover:to-orange-500 text-white shadow-red-600/30' 
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white'
+                  }`}>
+                  {selectedNetwork === 'MAINNET' ? '⚠️ SIGN REAL TRANSACTION ON BASE MAINNET' : `Sign & Broadcast on ${NETWORKS[selectedNetwork].name}`}
                 </button>
 
                 {txStatus && (
                   <div className={`p-2.5 rounded-xl border text-center text-xs font-mono ${txStatus.isError ? 'bg-red-950/60 border-red-800 text-red-400' : 'bg-blue-950/60 border-blue-800 text-blue-300'}`}>
                     <p>{txStatus.msg}</p>
                     {txStatus.hash && (
-                      <a href={`https://base-sepolia.blockscout.com/tx/${txStatus.hash}`} target="_blank" rel="noopener noreferrer" className="inline-block mt-1 text-green-400 underline font-bold">
-                        View on Blockscout Explorer ↗
+                      <a href={`${currentExplorer}/tx/${txStatus.hash}`} target="_blank" rel="noopener noreferrer" className="inline-block mt-1 text-green-400 underline font-bold">
+                        View Transaction Explorer ↗
                       </a>
                     )}
                   </div>
@@ -344,7 +471,7 @@ export default function Home() {
             <div className="bg-zinc-950/40 border border-dashed border-zinc-800/80 rounded-2xl p-8 text-center">
               <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center text-zinc-500 mb-3 font-mono">🤖</div>
               <h3 className="text-sm font-bold text-zinc-300 mb-1">Agent Standby Mode</h3>
-              <p className="text-xs text-zinc-500 max-w-xs mx-auto">Enter any token swap intent to execute on Base Sepolia.</p>
+              <p className="text-xs text-zinc-500 max-w-xs mx-auto">Select Mainnet or Sepolia Testnet above and execute any intent.</p>
             </div>
           )}
         </div>
