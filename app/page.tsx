@@ -1,23 +1,22 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useChainId, useSendTransaction, useSwitchChain } from 'wagmi';
-import { parseEther } from 'viem';
+import { useAccount, useConnect, useDisconnect, useChainId, useSendTransaction, useSwitchChain } from 'wagmi';
 
 export default function Home() {
   const { address, isConnected } = useAccount();
+  const { connect, connectors } = useConnect();
+  const { disconnect } = useDisconnect();
   const currentChainId = useChainId();
   const { switchChain } = useSwitchChain();
   const { sendTransactionAsync } = useSendTransaction();
 
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'SWAP' | 'BRIDGE'>('SWAP');
   const [isMainnet, setIsMainnet] = useState(true);
   const [agentLogs, setAgentLogs] = useState<string[]>([
-    'SYSTEM_INIT: Base AI Intent Engine Active',
-    'AWAITING: Connect Web3 Wallet to Proceed'
+    'SYSTEM_INIT: Base Swap Engine Active',
+    'AWAITING: Connect Web3 Wallet'
   ]);
 
   useEffect(() => {
@@ -42,7 +41,7 @@ export default function Home() {
     setLoading(true);
     setAgentLogs((prev) => [
       `[${new Date().toLocaleTimeString()}] INTENT: "${activePrompt}"`,
-      `[${new Date().toLocaleTimeString()}] AI Routing via Engine...`,
+      `[${new Date().toLocaleTimeString()}] Base AI Routing...`,
       ...prev
     ]);
 
@@ -58,18 +57,9 @@ export default function Home() {
 
       const txData = data.data.aggregatorQuote.transaction;
 
-      // Ağ Kontrolü (İşlem Hangi Ağda Yapılacak?)
-      if (txData.chainId && currentChainId !== txData.chainId) {
-        setAgentLogs((prev) => [
-          `[${new Date().toLocaleTimeString()}] SWITCHING_NETWORK: Requesting switch to Chain ID ${txData.chainId}...`,
-          ...prev
-        ]);
-        await switchChain({ chainId: txData.chainId });
-      }
-
-      // Cüzdana İmza/İşlem Gönderme
+      // Cüzdana İşlem Gönderme
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] SIGNING: Please confirm transaction in your wallet...`,
+        `[${new Date().toLocaleTimeString()}] SIGNING: Confirm transaction in wallet...`,
         ...prev
       ]);
 
@@ -98,7 +88,7 @@ export default function Home() {
     <main className="min-h-screen bg-[#07080C] text-slate-100 flex flex-col items-center p-4 md:p-8 relative overflow-hidden font-sans">
       
       {/* ⚠️ MAINNET / SEPOLIA WARNING BANNER */}
-      <div className={`w-full max-w-5xl py-2 px-4 rounded-xl text-xs font-semibold flex items-center justify-between mb-6 border ${
+      <div className={`w-full max-w-4xl py-2 px-4 rounded-xl text-xs font-semibold flex items-center justify-between mb-6 border ${
         isMainnet 
           ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
           : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
@@ -107,74 +97,71 @@ export default function Home() {
           <span>⚠️</span>
           <span>
             {isMainnet 
-              ? 'CANLI AĞ (MAINNET) MODU: Yapacağınız işlemler gerçek fonlar (Real Value) kullanır.' 
-              : 'TESTNET (SEPOLIA) MODU: Test bakiyeleri kullanılmaktadır.'}
+              ? 'CANLI AĞ (BASE MAINNET): Gerçek fonlar (Real Value) kullanılmaktadır.' 
+              : 'TESTNET (BASE SEPOLIA): Test bakiyeleri kullanılmaktadır.'}
           </span>
         </div>
         <button 
-          onClick={() => setIsMainnet(!isMainnet)}
+          onClick={() => {
+            const targetChainId = isMainnet ? 84532 : 8453; // Base Sepolia vs Base Mainnet
+            switchChain?.({ chainId: targetChainId });
+            setIsMainnet(!isMainnet);
+          }}
           className="underline hover:text-white text-[11px]"
         >
-          {isMainnet ? 'Testnet\'e Geç' : 'Mainnet\'e Geç'}
+          {isMainnet ? "Sepolia'ya Geç" : "Mainnet'e Geç"}
         </button>
       </div>
 
       {/* Top Navbar Header */}
-      <div className="w-full max-w-5xl flex items-center justify-between py-3 px-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-md mb-8 shadow-xl">
+      <div className="w-full max-w-4xl flex items-center justify-between py-3 px-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-md mb-8 shadow-xl">
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
-          <span className="font-bold text-sm tracking-wide">BaseIntent.ai</span>
+          <span className="font-bold text-sm tracking-wide">BaseSwap.ai</span>
         </div>
 
-        {/* RainbowKit Connect Button */}
-        <ConnectButton showBalance={false} chainStatus="icon" />
+        {/* Custom Wallet Button */}
+        {isConnected ? (
+          <div className="flex items-center gap-3">
+            <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-mono">
+              {address?.slice(0, 6)}...{address?.slice(-4)}
+            </span>
+            <button 
+              onClick={() => disconnect()}
+              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-xl border border-red-500/30 transition"
+            >
+              Çıkış
+            </button>
+          </div>
+        ) : (
+          <button 
+            onClick={() => connect({ connector: connectors[0] })}
+            className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-lg"
+          >
+            Cüzdan Bağla 🔒
+          </button>
+        )}
       </div>
 
-      <div className="max-w-4xl w-full z-10 space-y-6">
+      <div className="max-w-2xl w-full z-10 space-y-6">
         
-        {/* Main Title */}
-        <div className="text-center space-y-3">
-          <h1 className="text-3xl md:text-5xl font-black tracking-tight text-white">
-            Natural Language <span className="text-blue-500">DeFi Execution</span>
+        {/* Title */}
+        <div className="text-center space-y-2">
+          <h1 className="text-3xl font-black tracking-tight text-white">
+            Base Network <span className="text-blue-500">AI Swap</span>
           </h1>
-          <p className="text-slate-400 text-sm max-w-xl mx-auto">
-            Base ağında doğrudan cüzdanınızla swap yapın veya diğer ağlardan tek komutla köprü kurun.
+          <p className="text-slate-400 text-xs">
+            Doğal dille yazın, Base ağında anında swap yapın.
           </p>
         </div>
 
-        {/* Input Card */}
-        <div className="bg-[#0D0F17] border border-slate-800/90 rounded-3xl p-6 shadow-2xl space-y-5">
-          
-          {/* Mode Tabs */}
-          <div className="flex items-center gap-2 p-1 bg-[#07080C] rounded-xl border border-slate-800/80 w-fit text-xs font-semibold">
-            <button
-              onClick={() => setActiveTab('SWAP')}
-              className={`px-4 py-2 rounded-lg transition ${
-                activeTab === 'SWAP' ? 'bg-blue-600 text-white' : 'text-slate-400'
-              }`}
-            >
-              🔄 DEX Swap (Base)
-            </button>
-            <button
-              onClick={() => setActiveTab('BRIDGE')}
-              className={`px-4 py-2 rounded-lg transition ${
-                activeTab === 'BRIDGE' ? 'bg-purple-600 text-white' : 'text-slate-400'
-              }`}
-            >
-              🌉 Cross-Chain Bridge
-            </button>
-          </div>
-
-          {/* Prompt Form */}
+        {/* Input Box */}
+        <div className="bg-[#0D0F17] border border-slate-800/90 rounded-3xl p-6 shadow-2xl space-y-4">
           <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={
-                activeTab === 'SWAP'
-                  ? 'e.g. Swap 0.0001 ETH for USDC...'
-                  : 'e.g. Bridge 0.001 ETH from Arbitrum to Base...'
-              }
+              placeholder="Örn: Swap 0.0001 ETH for USDC on Base..."
               className="w-full h-28 bg-[#07080C] border border-slate-800 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono"
             />
             <button
@@ -182,32 +169,32 @@ export default function Home() {
               disabled={loading || !isConnected}
               className="absolute bottom-3 right-3 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg disabled:opacity-40"
             >
-              {loading ? 'İşleniyor...' : isConnected ? 'İşlemi Çalıştır ⚡' : 'Cüzdan Bağlayın 🔒'}
+              {loading ? 'İşleniyor...' : isConnected ? 'Swap Çalıştır ⚡' : 'Cüzdan Bağlayın 🔒'}
             </button>
           </div>
 
-          {/* Quick Prompts */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+          {/* Quick Buttons */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
             <button
-              onClick={() => { setPrompt('Swap 0.0001 ETH for USDC'); setActiveTab('SWAP'); }}
-              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-blue-500/40 text-left text-slate-300"
+              onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
+              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-blue-500/40 text-left text-slate-300 font-mono"
             >
-              🔄 Swap 0.0001 ETH for USDC (Base)
+              🔄 0.0001 ETH ➔ USDC
             </button>
             <button
-              onClick={() => { setPrompt('Bridge 0.001 ETH from Arbitrum to Base'); setActiveTab('BRIDGE'); }}
-              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-purple-500/40 text-left text-slate-300"
+              onClick={() => setPrompt('Swap 1 USDC for ETH')}
+              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-blue-500/40 text-left text-slate-300 font-mono"
             >
-              🌉 Bridge 0.001 ETH from Arbitrum
+              🔄 1 USDC ➔ ETH
             </button>
           </div>
         </div>
 
-        {/* Live Telemetry Console */}
+        {/* Telemetry Console */}
         <div className="bg-[#05060A] border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-400 space-y-2">
           <div className="text-slate-500 border-b border-slate-800 pb-2 flex justify-between">
-            <span>CANLI İŞLEM LOGLARI</span>
-            <span>{isConnected ? 'WALLET READY' : 'NO WALLET'}</span>
+            <span>İŞLEM LOGLARI</span>
+            <span>{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
           </div>
           <div className="space-y-1 max-h-36 overflow-y-auto">
             {agentLogs.map((log, i) => (
