@@ -33,13 +33,13 @@ export default function Home() {
     }
   }, [isConnected, address]);
 
-  // Tek tıkla aktif cüzdana bağlanma
+  // Cüzdan bağlama mantığı (Gereksiz 10 tane buton basmaz)
   const handleConnect = () => {
-    const preferredConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
-    if (preferredConnector) {
-      connect({ connector: preferredConnector });
+    const connector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
+    if (connector) {
+      connect({ connector });
     } else {
-      alert('Cüzdan eklentisi bulunamadı! Rabby veya MetaMask yüklü olduğundan emin olun.');
+      alert('Lütfen MetaMask veya Rabby cüzdanınızın yüklü olduğundan emin olun.');
     }
   };
 
@@ -68,20 +68,21 @@ export default function Home() {
         body: JSON.stringify({ prompt: activePrompt, userAddress: address })
       });
 
-      const data = await res.json();
+      const resData = await res.json();
 
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Intent işlenirken hata oluştu');
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Intent işlenirken API hatası oluştu');
       }
 
-      const txData = data.data?.aggregatorQuote?.transaction;
+      // Backend route.ts yapına tam uyumlu okuma yapısı
+      const txData = resData.data?.aggregatorQuote?.transaction;
       if (!txData || !txData.to) {
-        throw new Error('API geçerli bir işlem verisi dönmedi.');
+        throw new Error('API geçerli bir Uniswap V3 calldata üretmedi.');
       }
 
       setAgentLogs((prev) => [
         `[${new Date().toLocaleTimeString()}] STEP 2/2: Prompting wallet for signature...`,
-        `[${new Date().toLocaleTimeString()}] TARGET_CONTRACT: ${txData.to}`,
+        `[${new Date().toLocaleTimeString()}] TARGET_ROUTER: ${txData.to}`,
         ...prev
       ]);
 
@@ -100,7 +101,7 @@ export default function Home() {
 
     } catch (err: any) {
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'İşlem başarısız'}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'İşlem iptal edildi/başarısız oldu'}`,
         ...prev
       ]);
     } finally {
@@ -113,7 +114,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#030407] text-slate-100 flex flex-col items-center p-4 md:p-8 relative font-sans">
       
-      {/* HEADER - TEK BUTONLU TEMİZ TASARIM */}
+      {/* HEADER */}
       <div className="w-full max-w-2xl z-10 flex items-center justify-between py-4 px-6 rounded-2xl bg-slate-900/50 border border-slate-800 mb-8 shadow-xl">
         <div className="font-bold text-sm tracking-wide text-white flex items-center gap-2">
           🛡️ BASE INTENT AI
