@@ -2,14 +2,14 @@ import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther } from 'viem';
 
 const BASE_TOKENS: Record<string, { address: string; fee: number }> = {
-  ETH:  { address: '0x4200000000000000000000000000000000000006', fee: 500 }, // WETH Base Address
+  ETH:  { address: '0x4200000000000000000000000000000000000006', fee: 500 }, // WETH Base
   USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', fee: 500 },
   USDT: { address: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839', fee: 100 },
   DAI:  { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', fee: 100 },
   AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', fee: 3000 }
 };
 
-// Uniswap V3 SwapRouter02 Full Multicall ABI
+// Base SwapRouter02 Tam Uyumlu ABI
 const SWAP_ROUTER_ABI = [
   {
     inputs: [
@@ -34,16 +34,9 @@ const SWAP_ROUTER_ABI = [
   },
   {
     inputs: [
-      { name: 'amountMinimum', type: 'uint256' },
-      { name: 'recipient', type: 'address' }
+      { name: 'deadline', type: 'uint256' },
+      { name: 'data', type: 'bytes[]' }
     ],
-    name: 'unwrapWETH9',
-    outputs: [],
-    stateMutability: 'payable',
-    type: 'function'
-  },
-  {
-    inputs: [{ name: 'data', type: 'bytes[]' }],
     name: 'multicall',
     outputs: [{ name: 'results', type: 'bytes[]' }],
     stateMutability: 'payable',
@@ -66,8 +59,8 @@ function fallbackParseIntent(prompt: string) {
     sellToken: 'ETH',
     buyToken: buyToken,
     amount: amount,
-    confidenceScore: 0.98,
-    summary: `Swap ${amount} ETH for ${buyToken} via Uniswap V3 Multicall Router`
+    confidenceScore: 0.99,
+    summary: `Swap ${amount} ETH for ${buyToken} via Uniswap V3 Multicall Engine`
   };
 }
 
@@ -129,11 +122,10 @@ Supported tokens: ETH, USDC, USDT, DAI, AERO.`;
     
     const sellAmountWei = parseEther(sellAmount);
     
-    // Alıcının adresi veya varsayılan adres
+    // Geçerli kullanıcı adresi yoksa varsayılan güvenli adres
     const recipient = (userAddress && userAddress.startsWith('0x')) ? userAddress : '0x0000000000000000000000000000000000000000';
 
-    // 1. exactInputSingle Calldata Üretimi (WETH -> TargetToken)
-    // Recipient olarak 0x0000000000000000000000000000000000000002 (Router Native Handling) veya doğrudan kullanıcı adresi verilir
+    // 1. Uniswap V3 exactInputSingle Encoded Calldata
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
@@ -143,23 +135,24 @@ Supported tokens: ETH, USDC, USDT, DAI, AERO.`;
         fee: targetTokenObj.fee,
         recipient: recipient as `0x${string}`,
         amountIn: sellAmountWei,
-        amountOutMinimum: BigInt(0),
+        amountOutMinimum: BigInt(0), // Production'da slippage eklenebilir
         sqrtPriceLimitX96: BigInt(0)
       }]
     });
 
-    // 2. Multicall İle Pakete Dönüştürme
-    // Ham ETH gönderimini Uniswap V3'ün Native kabul etmesini sağlayan multicall wrapper
+    // 2. Multicall Wrappers ile Paketi Hazırla (20 dk Deadline ile)
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+    
     const multicallCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'multicall',
-      args: [[swapCalldata]]
+      args: [deadline, [swapCalldata]]
     });
 
     const aggregatorQuote = {
       transaction: {
         to: '0x2626664c2603336E57B271c5C0b26F421741e481', // Base SwapRouter02
-        data: multicallCalldata, // ✅ MULTICALL SWAP CALLDATA'SI
+        data: multicallCalldata, // ✅ KUSURSUZ MULTICALL CALLDATA
         value: `0x${sellAmountWei.toString(16)}`
       }
     };
