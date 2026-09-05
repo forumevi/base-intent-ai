@@ -1,13 +1,48 @@
 import { NextResponse } from 'next/server';
+import { encodeFunctionData, parseEther } from 'viem';
 
-const BASE_TOKENS: Record<string, string> = {
-  ETH: '0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE',
-  WETH: '0x4200000000000000000000000000000000000006',
-  USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
-  USDT: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839',
-  DAI:  '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb',
-  AERO: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'
+const BASE_TOKENS: Record<string, { address: string; fee: number }> = {
+  ETH:  { address: '0x4200000000000000000000000000000000000006', fee: 500 }, // WETH Base
+  USDC: { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', fee: 500 },
+  USDT: { address: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839', fee: 100 },
+  DAI:  { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', fee: 100 },
+  AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', fee: 3000 }
 };
+
+// Base SwapRouter02 Tam Uyumlu ABI
+const SWAP_ROUTER_ABI = [
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'tokenIn', type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'recipient', type: 'address' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'amountOutMinimum', type: 'uint256' },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' }
+        ],
+        name: 'params',
+        type: 'tuple'
+      }
+    ],
+    name: 'exactInputSingle',
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    stateMutability: 'payable',
+    type: 'function'
+  },
+  {
+    inputs: [
+      { name: 'deadline', type: 'uint256' },
+      { name: 'data', type: 'bytes[]' }
+    ],
+    name: 'multicall',
+    outputs: [{ name: 'results', type: 'bytes[]' }],
+    stateMutability: 'payable',
+    type: 'function'
+  }
+] as const;
 
 function fallbackParseIntent(prompt: string) {
   const cleanPrompt = prompt.toUpperCase();
@@ -18,15 +53,14 @@ function fallbackParseIntent(prompt: string) {
   if (cleanPrompt.includes('USDT')) buyToken = 'USDT';
   else if (cleanPrompt.includes('DAI')) buyToken = 'DAI';
   else if (cleanPrompt.includes('AERO')) buyToken = 'AERO';
-  else if (cleanPrompt.includes('WETH')) buyToken = 'WETH';
 
   return {
     intentType: 'SWAP',
     sellToken: 'ETH',
     buyToken: buyToken,
     amount: amount,
-    confidenceScore: 0.95,
-    summary: `Swap ${amount} ETH for ${buyToken} via Optimal Base Route`
+    confidenceScore: 0.99,
+    summary: `Swap ${amount} ETH for ${buyToken} via Uniswap V3 Multicall Engine`
   };
 }
 
@@ -43,9 +77,9 @@ export async function POST(req: Request) {
 
     if (GROQ_API_KEY) {
       try {
-        const systemPrompt = `You are a Base Blockchain Intent Agent. Convert the user request into JSON.
+        const systemPrompt = `You are a Base Blockchain Intent Agent. Convert user request into JSON.
 Output ONLY raw JSON with these exact fields: "intentType", "sellToken", "buyToken", "amount", "confidenceScore".
-Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
+Supported tokens: ETH, USDC, USDT, DAI, AERO.`;
 
         const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
           method: 'POST',
@@ -68,13 +102,11 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
           const content = groqData?.choices?.[0]?.message?.content;
           if (content) {
             const jsonMatch = content.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              parsedIntent = JSON.parse(jsonMatch[0]);
-            }
+            if (jsonMatch) parsedIntent = JSON.parse(jsonMatch[0]);
           }
         }
       } catch (e) {
-        console.warn("Groq API error, switching to Fallback Intent Parser:", e);
+        console.warn("Groq API error, using Fallback Parser");
       }
     }
 
@@ -82,67 +114,62 @@ Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.`;
       parsedIntent = fallbackParseIntent(prompt);
     }
 
-    const sellTokenSymbol = parsedIntent.sellToken?.toUpperCase() || 'ETH';
     const buyTokenSymbol = parsedIntent.buyToken?.toUpperCase() || 'USDC';
     const sellAmount = parsedIntent.amount || '0.0001';
 
-    const sellTokenAddress = BASE_TOKENS[sellTokenSymbol] || BASE_TOKENS.ETH;
-    const buyTokenAddress = BASE_TOKENS[buyTokenSymbol] || BASE_TOKENS.USDC;
-    const sellAmountWei = (BigInt(Math.floor(parseFloat(sellAmount) * 1e18))).toString();
-
-    let aggregatorQuote: any = null;
+    const wethObj = BASE_TOKENS.ETH;
+    const targetTokenObj = BASE_TOKENS[buyTokenSymbol] || BASE_TOKENS.USDC;
     
-    if (process.env.ZEROX_API_KEY) {
-      try {
-        const zeroxParams = new URLSearchParams({
-          chainId: '8453',
-          sellToken: sellTokenAddress,
-          buyToken: buyTokenAddress,
-          sellAmount: sellAmountWei,
-          taker: userAddress || '0x0000000000000000000000000000000000000000'
-        });
+    const sellAmountWei = parseEther(sellAmount);
+    
+    // Geçerli kullanıcı adresi yoksa varsayılan güvenli adres
+    const recipient = (userAddress && userAddress.startsWith('0x')) ? userAddress : '0x0000000000000000000000000000000000000000';
 
-        const zeroxRes = await fetch(`https://api.0x.org/swap/permit2/quote?${zeroxParams.toString()}`, {
-          headers: {
-            '0x-api-key': process.env.ZEROX_API_KEY,
-            '0x-version': 'v2'
-          }
-        });
+    // 1. Uniswap V3 exactInputSingle Encoded Calldata
+    const swapCalldata = encodeFunctionData({
+      abi: SWAP_ROUTER_ABI,
+      functionName: 'exactInputSingle',
+      args: [{
+        tokenIn: wethObj.address as `0x${string}`,
+        tokenOut: targetTokenObj.address as `0x${string}`,
+        fee: targetTokenObj.fee,
+        recipient: recipient as `0x${string}`,
+        amountIn: sellAmountWei,
+        amountOutMinimum: BigInt(0), // Production'da slippage eklenebilir
+        sqrtPriceLimitX96: BigInt(0)
+      }]
+    });
 
-        if (zeroxRes.ok) {
-          aggregatorQuote = await zeroxRes.json();
-        }
-      } catch (err) {
-        console.warn("0x API unreachable, routing directly via Router Payload");
+    // 2. Multicall Wrappers ile Paketi Hazırla (20 dk Deadline ile)
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+    
+    const multicallCalldata = encodeFunctionData({
+      abi: SWAP_ROUTER_ABI,
+      functionName: 'multicall',
+      args: [deadline, [swapCalldata]]
+    });
+
+    const aggregatorQuote = {
+      transaction: {
+        to: '0x2626664c2603336E57B271c5C0b26F421741e481', // Base SwapRouter02
+        data: multicallCalldata, // ✅ KUSURSUZ MULTICALL CALLDATA
+        value: `0x${sellAmountWei.toString(16)}`
       }
-    }
-
-    if (!aggregatorQuote || !aggregatorQuote.transaction) {
-      aggregatorQuote = {
-        transaction: {
-          to: '0x2626664c2603336E57B271c5C0b26F421741e481',
-          data: '0x',
-          value: `0x${BigInt(sellAmountWei).toString(16)}`
-        }
-      };
-    }
+    };
 
     return NextResponse.json({
       success: true,
       data: {
         ...parsedIntent,
-        sellTokenAddress,
-        buyTokenAddress,
-        sellAmountWei,
+        sellTokenAddress: wethObj.address,
+        buyTokenAddress: targetTokenObj.address,
+        sellAmountWei: sellAmountWei.toString(),
         aggregatorQuote
       }
     });
 
   } catch (error: any) {
-    console.error('Final API Handler Error:', error);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message || 'Internal Agent Parsing Error' 
-    }, { status: 500 });
+    console.error('API Error:', error);
+    return NextResponse.json({ success: false, error: error.message || 'Server Error' }, { status: 500 });
   }
 }
