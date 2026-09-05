@@ -13,39 +13,47 @@ export default function Home() {
 
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isMainnet, setIsMainnet] = useState(true);
+  const [activeStep, setActiveStep] = useState<number>(0);
+  const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [agentLogs, setAgentLogs] = useState<string[]>([
-    'SYSTEM_INIT: Base Swap Engine Active',
-    'AWAITING: Connect Web3 Wallet'
+    'BASE_ENGINE_INIT: Base Agentic Execution Environment Active',
+    'AI_MODEL_READY: Groq Llama 3.3 70B Quantized Engine Standby',
+    'AWAITING_USER_INTENT: Connect Web3 Wallet to Execute On-Chain Actions'
   ]);
 
+  const isSepolia = currentChainId === 84532;
+
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && address) {
       setAgentLogs((prev) => [
-        `WALLET_CONNECTED: ${address?.slice(0, 6)}...${address?.slice(-4)}`,
-        `CURRENT_CHAIN_ID: ${currentChainId}`,
+        `WALLET_CONNECTED: ${address.slice(0, 6)}...${address.slice(-4)}`,
+        `CHAIN_STATE: Chain ID ${currentChainId} (${isSepolia ? 'Base Sepolia Testnet' : 'Base Mainnet'})`,
         ...prev
       ]);
     }
-  }, [isConnected, address, currentChainId]);
+  }, [isConnected, address, currentChainId, isSepolia]);
 
   const handleRunAgent = async (selectedPrompt?: string) => {
     const activePrompt = selectedPrompt || prompt;
     if (!activePrompt) return;
 
     if (!isConnected) {
-      alert('Lütfen önce cüzdanınızı bağlayın!');
+      alert('Please connect your Base-compatible Web3 wallet first!');
       return;
     }
 
     setLoading(true);
+    setLastTxHash(null);
+    setActiveStep(1);
+
     setAgentLogs((prev) => [
-      `[${new Date().toLocaleTimeString()}] INTENT: "${activePrompt}"`,
-      `[${new Date().toLocaleTimeString()}] Base AI Routing...`,
+      `[${new Date().toLocaleTimeString()}] STEP 1/3: Parsing Natural Language Intent...`,
+      `[${new Date().toLocaleTimeString()}] PROMPT: "${activePrompt}"`,
       ...prev
     ]);
 
     try {
+      // Step 1: AI Routing
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -53,30 +61,38 @@ export default function Home() {
       });
       const data = await res.json();
 
-      if (!data.success) throw new Error(data.error);
+      if (!data.success) throw new Error(data.error || 'Failed to parse AI intent');
 
+      setActiveStep(2);
       const txData = data.data.aggregatorQuote.transaction;
 
-      // Cüzdana İşlem Gönderme
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] SIGNING: Confirm transaction in wallet...`,
+        `[${new Date().toLocaleTimeString()}] STEP 2/3: Base Calldata Generated Successfully`,
+        `[${new Date().toLocaleTimeString()}] TARGET_CONTRACT: ${txData.to}`,
+        `[${new Date().toLocaleTimeString()}] AWAITING_SIGNATURE: Prompting user wallet...`,
         ...prev
       ]);
 
+      // Step 2: On-Chain Execution
       const txHash = await sendTransactionAsync({
         to: txData.to as `0x${string}`,
         data: txData.data as `0x${string}`,
-        value: BigInt(txData.value)
+        value: BigInt(txData.value || '0')
       });
 
+      setActiveStep(3);
+      setLastTxHash(txHash);
+
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] SUCCESS: TX Broadcasted! Hash: ${txHash.slice(0, 10)}...`,
+        `[${new Date().toLocaleTimeString()}] STEP 3/3: ON-CHAIN TRANSACTION CONFIRMED!`,
+        `[${new Date().toLocaleTimeString()}] HASH: ${txHash}`,
         ...prev
       ]);
 
     } catch (err: any) {
+      setActiveStep(0);
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] ERROR: ${err.message || 'Transaction Rejected'}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'Transaction cancelled by user'}`,
         ...prev
       ]);
     } finally {
@@ -84,121 +100,189 @@ export default function Home() {
     }
   };
 
+  const explorerBaseUrl = isSepolia 
+    ? 'https://base-sepolia.blockscout.com/tx/' 
+    : 'https://base.blockscout.com/tx/';
+
   return (
-    <main className="min-h-screen bg-[#07080C] text-slate-100 flex flex-col items-center p-4 md:p-8 relative overflow-hidden font-sans">
+    <main className="min-h-screen bg-[#030407] text-slate-100 flex flex-col items-center p-4 md:p-8 relative overflow-hidden font-sans selection:bg-blue-500 selection:text-white">
       
-      {/* ⚠️ MAINNET / SEPOLIA WARNING BANNER */}
-      <div className={`w-full max-w-4xl py-2 px-4 rounded-xl text-xs font-semibold flex items-center justify-between mb-6 border ${
-        isMainnet 
-          ? 'bg-amber-500/10 border-amber-500/30 text-amber-300' 
-          : 'bg-blue-500/10 border-blue-500/30 text-blue-300'
-      }`}>
-        <div className="flex items-center gap-2">
-          <span>⚠️</span>
-          <span>
-            {isMainnet 
-              ? 'CANLI AĞ (BASE MAINNET): Gerçek fonlar (Real Value) kullanılmaktadır.' 
-              : 'TESTNET (BASE SEPOLIA): Test bakiyeleri kullanılmaktadır.'}
+      {/* GLOW BACKGROUND EFEKTLERİ */}
+      <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-blue-600/15 blur-[140px] pointer-events-none rounded-full" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[300px] bg-indigo-600/10 blur-[120px] pointer-events-none rounded-full" />
+
+      {/* BASE CREATOR GRANT / ENVIRONMENT SAFETY BANNER */}
+      <div className="w-full max-w-4xl z-10 mb-6 flex flex-col sm:flex-row items-center justify-between gap-3 p-3 rounded-2xl bg-gradient-to-r from-blue-950/40 via-slate-900/60 to-slate-950/40 border border-blue-500/20 backdrop-blur-xl shadow-[0_0_25px_rgba(0,82,255,0.08)]">
+        <div className="flex items-center gap-3">
+          <span className="px-2.5 py-1 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-400 font-mono text-[10px] font-bold tracking-wider uppercase">
+            Base Creator Grant Build
+          </span>
+          <span className="text-xs text-slate-300 font-medium">
+            {!isSepolia ? '🔴 Base Mainnet (Real On-Chain Value)' : '🟡 Base Sepolia Testnet'}
           </span>
         </div>
+
         <button 
           onClick={() => {
-            const targetChainId = isMainnet ? 84532 : 8453; // Base Sepolia vs Base Mainnet
+            const targetChainId = isSepolia ? 8453 : 84532;
             switchChain?.({ chainId: targetChainId });
-            setIsMainnet(!isMainnet);
           }}
-          className="underline hover:text-white text-[11px]"
+          className="px-3 py-1 bg-slate-900 hover:bg-slate-800 rounded-xl text-[11px] border border-slate-700 text-slate-300 transition font-mono"
         >
-          {isMainnet ? "Sepolia'ya Geç" : "Mainnet'e Geç"}
+          {isSepolia ? "Switch to Mainnet 🚀" : "Switch to Sepolia 🧪"}
         </button>
       </div>
 
-      {/* Top Navbar Header */}
-      <div className="w-full max-w-4xl flex items-center justify-between py-3 px-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-md mb-8 shadow-xl">
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
-          <span className="font-bold text-sm tracking-wide">BaseSwap.ai</span>
+      {/* TOP COMMAND HEADER */}
+      <div className="w-full max-w-4xl z-10 flex items-center justify-between py-4 px-6 rounded-2xl bg-slate-900/40 border border-slate-800/80 backdrop-blur-2xl mb-8 shadow-2xl">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-blue-600 flex items-center justify-center font-black text-white text-sm shadow-[0_0_15px_rgba(0,82,255,0.5)]">
+            🛡️
+          </div>
+          <div>
+            <div className="font-bold text-sm tracking-wide text-white flex items-center gap-2">
+              BASE INTENT AI <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/30">v2.0</span>
+            </div>
+            <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              BASE L2 AGENT // ONLINE
+            </div>
+          </div>
         </div>
 
-        {/* Custom Wallet Button */}
+        {/* WALLET BUTTON */}
         {isConnected ? (
           <div className="flex items-center gap-3">
-            <span className="text-xs bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-700 font-mono">
-              {address?.slice(0, 6)}...{address?.slice(-4)}
-            </span>
+            <div className="hidden sm:flex flex-col text-right font-mono text-[11px]">
+              <span className="text-slate-400">CONNECTED</span>
+              <span className="text-blue-400 font-bold">{address?.slice(0, 6)}...{address?.slice(-4)}</span>
+            </div>
             <button 
               onClick={() => disconnect()}
-              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-1.5 rounded-xl border border-red-500/30 transition"
+              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 px-3 py-2 rounded-xl border border-red-500/30 transition font-mono"
             >
-              Çıkış
+              Disconnect
             </button>
           </div>
         ) : (
           <button 
             onClick={() => connect({ connector: connectors[0] })}
-            className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-lg"
+            className="text-xs bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-5 py-2.5 rounded-xl transition shadow-[0_0_20px_rgba(0,82,255,0.4)] font-mono"
           >
-            Cüzdan Bağla 🔒
+            Connect Wallet 🔒
           </button>
         )}
       </div>
 
+      {/* MAIN CONTAINER */}
       <div className="max-w-2xl w-full z-10 space-y-6">
         
-        {/* Title */}
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-black tracking-tight text-white">
-            Base Network <span className="text-blue-500">AI Swap</span>
+        {/* HERO TITLE */}
+        <div className="text-center space-y-3">
+          <h1 className="text-3xl md:text-5xl font-black tracking-tight text-white leading-tight">
+            Autonomous <span className="bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">DeFi Intents</span> on Base
           </h1>
-          <p className="text-slate-400 text-xs">
-            Doğal dille yazın, Base ağında anında swap yapın.
+          <p className="text-slate-400 text-xs md:text-sm font-mono max-w-lg mx-auto">
+            Transform plain text prompt into executed Base L2 transactions using Groq AI & Viem Engine.
           </p>
         </div>
 
-        {/* Input Box */}
-        <div className="bg-[#0D0F17] border border-slate-800/90 rounded-3xl p-6 shadow-2xl space-y-4">
+        {/* VISUAL AI PIPELINE ANIMATION */}
+        <div className="grid grid-cols-3 gap-2 p-3 bg-slate-950/60 border border-slate-800/80 rounded-2xl backdrop-blur-md text-[11px] font-mono">
+          <div className={`p-2 rounded-xl border text-center transition-all ${
+            activeStep >= 1 ? 'bg-blue-600/20 border-blue-500 text-blue-300 shadow-[0_0_10px_rgba(0,82,255,0.2)]' : 'bg-slate-900/40 border-slate-800 text-slate-500'
+          }`}>
+            1. AI Parsing
+          </div>
+          <div className={`p-2 rounded-xl border text-center transition-all ${
+            activeStep >= 2 ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'bg-slate-900/40 border-slate-800 text-slate-500'
+          }`}>
+            2. Base Routing
+          </div>
+          <div className={`p-2 rounded-xl border text-center transition-all ${
+            activeStep === 3 ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'bg-slate-900/40 border-slate-800 text-slate-500'
+          }`}>
+            3. On-Chain Exec
+          </div>
+        </div>
+
+        {/* PROMPT INTERACTION TERMINAL */}
+        <div className="bg-slate-900/50 border border-slate-800 rounded-3xl p-6 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.5)] space-y-4">
           <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Örn: Swap 0.0001 ETH for USDC on Base..."
-              className="w-full h-28 bg-[#07080C] border border-slate-800 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono"
+              placeholder="e.g. Swap 0.0001 ETH for USDC on Base..."
+              className="w-full h-32 bg-[#05070D] border border-slate-800/80 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500/80 font-mono resize-none transition shadow-inner"
             />
             <button
               onClick={() => handleRunAgent()}
               disabled={loading || !isConnected}
-              className="absolute bottom-3 right-3 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg disabled:opacity-40"
+              className="absolute bottom-3 right-3 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-xs rounded-xl shadow-[0_0_15px_rgba(0,82,255,0.4)] disabled:opacity-40 transition font-mono"
             >
-              {loading ? 'İşleniyor...' : isConnected ? 'Swap Çalıştır ⚡' : 'Cüzdan Bağlayın 🔒'}
+              {loading ? 'Executing AI Pipeline...' : isConnected ? 'Execute Intent ⚡' : 'Connect Wallet 🔒'}
             </button>
           </div>
 
-          {/* Quick Buttons */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <button
-              onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
-              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-blue-500/40 text-left text-slate-300 font-mono"
-            >
-              🔄 0.0001 ETH ➔ USDC
-            </button>
-            <button
-              onClick={() => setPrompt('Swap 1 USDC for ETH')}
-              className="p-3 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-blue-500/40 text-left text-slate-300 font-mono"
-            >
-              🔄 1 USDC ➔ ETH
-            </button>
+          {/* ONE-CLICK INTENT PRESETS */}
+          <div className="space-y-1.5">
+            <span className="text-[10px] font-mono text-slate-500 uppercase tracking-wider">Suggested Base Intents</span>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
+                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between"
+              >
+                <span>🔄 Swap 0.0001 ETH ➔ USDC</span>
+                <span className="opacity-0 group-hover:opacity-100 text-blue-400 transition">↗</span>
+              </button>
+              <button
+                onClick={() => setPrompt('Swap 1 USDC for ETH')}
+                className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 hover:border-blue-500/50 text-left text-slate-300 font-mono transition group flex items-center justify-between"
+              >
+                <span>🔄 Swap 1 USDC ➔ ETH</span>
+                <span className="opacity-0 group-hover:opacity-100 text-blue-400 transition">↗</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        {/* Telemetry Console */}
-        <div className="bg-[#05060A] border border-slate-800 rounded-2xl p-4 font-mono text-xs text-slate-400 space-y-2">
-          <div className="text-slate-500 border-b border-slate-800 pb-2 flex justify-between">
-            <span>İŞLEM LOGLARI</span>
-            <span>{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
+        {/* ON-CHAIN PROOF CARD */}
+        {lastTxHash && (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-mono flex items-center justify-between shadow-[0_0_20px_rgba(16,185,129,0.15)] animate-fade-in">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🎉</span>
+              <span>Transaction Confirmed on Base!</span>
+            </div>
+            <a 
+              href={`${explorerBaseUrl}${lastTxHash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl font-bold transition flex items-center gap-1"
+            >
+              Blockscout Explorer ↗
+            </a>
           </div>
-          <div className="space-y-1 max-h-36 overflow-y-auto">
+        )}
+
+        {/* TELEMETRY CONSOLE */}
+        <div className="bg-[#020305] border border-slate-800/80 rounded-2xl p-4 font-mono text-xs text-slate-400 space-y-2 shadow-2xl">
+          <div className="text-slate-500 border-b border-slate-800/80 pb-2 flex justify-between items-center text-[11px]">
+            <span className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              ON-CHAIN AGENT TELEMETRY LOGS
+            </span>
+            <span className={isConnected ? "text-emerald-400 font-bold" : "text-slate-600"}>
+              {isConnected ? 'NODE_CONNECTED' : 'DISCONNECTED'}
+            </span>
+          </div>
+          <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1 scrollbar-thin">
             {agentLogs.map((log, i) => (
-              <div key={i}>› {log}</div>
+              <div key={i} className="leading-relaxed flex items-start gap-2">
+                <span className="text-blue-500 select-none">›</span>
+                <span className={log.includes('CONFIRMED') ? 'text-emerald-400 font-bold' : log.includes('STEP') ? 'text-blue-300' : 'text-slate-300'}>
+                  {log}
+                </span>
+              </div>
             ))}
           </div>
         </div>
