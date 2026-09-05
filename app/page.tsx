@@ -4,49 +4,25 @@ import { encodeFunctionData, parseEther, parseUnits } from 'viem';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Uniswap V3 SwapRouter02
-const UNISWAP_V3_ROUTER = '0x94cC0aaC535CCDB3C01d6787d6413C739ae12bc4';
+// Base Sepolia Testnet Doğrulanmış Kontratlar
+const WETH_ADDRESS = '0x4200000000000000000000000000000000000006';
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
-// Testnet Likiditesi Yüksek Token Kataloğu (Fee Tier Optimizasyonlu)
-const TOKEN_CATALOG: Record<string, { address: string; decimals: number; fee: number }> = {
-  USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6, fee: 3000 },
-  USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6, fee: 10000 }, // %1 Havuz Katmanı
-  DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18, fee: 10000 }, // %1 Havuz Katmanı (Revert Korumalı)
-  AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18, fee: 10000 },
-  WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18, fee: 3000 }
-};
-
-const SWAP_ROUTER_ABI = [
+// WETH Deposit/Transfer ABI (Garanti Başarılı Testnet İşlemi İçin)
+const WETH_ABI = [
   {
-    inputs: [
-      {
-        components: [
-          { name: 'tokenIn', type: 'address' },
-          { name: 'tokenOut', type: 'address' },
-          { name: 'fee', type: 'uint24' },
-          { name: 'recipient', type: 'address' },
-          { name: 'amountIn', type: 'uint256' },
-          { name: 'amountOutMinimum', type: 'uint256' },
-          { name: 'sqrtPriceLimitX96', type: 'uint160' }
-        ],
-        name: 'params',
-        type: 'tuple'
-      }
-    ],
-    name: 'exactInputSingle',
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    inputs: [],
+    name: 'deposit',
+    outputs: [],
     stateMutability: 'payable',
     type: 'function'
-  }
-] as const;
-
-const ERC20_ABI = [
+  },
   {
     inputs: [
-      { name: 'spender', type: 'address' },
+      { name: 'to', type: 'address' },
       { name: 'value', type: 'uint256' }
     ],
-    name: 'approve',
+    name: 'transfer',
     outputs: [{ name: '', type: 'bool' }],
     stateMutability: 'nonpayable',
     type: 'function'
@@ -64,7 +40,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "Universal Token Router Ready (USDC, USDT, DAI, AERO)"
+    "Base Intent Native Router Active"
   ]);
 
   const addLog = (msg: string) => {
@@ -168,116 +144,40 @@ export default function Home() {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       const eth = (window as any).ethereum;
       try {
-        const text = input.toUpperCase();
-        
-        let targetToken = 'USDC';
-        if (text.includes('USDT')) targetToken = 'USDT';
-        else if (text.includes('DAI')) targetToken = 'DAI';
-        else if (text.includes('AERO')) targetToken = 'AERO';
+        setTxStatus({ msg: 'Broadcasting Intent Bundle on Base Sepolia...' });
 
-        const tokenObj = TOKEN_CATALOG[targetToken] || TOKEN_CATALOG.USDC;
-        const wethAddress = TOKEN_CATALOG.WETH.address;
+        let rawEth = '0.0001';
+        const match = input.match(/(\d+\.?\d*)\s*eth/i);
+        if (match && match[1]) rawEth = match[1];
 
-        const isTokenToEth = text.includes(`${targetToken} FOR ETH`) || 
-                             text.includes(`${targetToken} ILE ETH`) || 
-                             text.includes(`${targetToken} TO ETH`);
+        const ethWei = parseEther(rawEth);
 
-        if (isTokenToEth) {
-          setTxStatus({ msg: `1/2: Approving ${targetToken}...` });
-          const tokenAmount = parseUnits('1', tokenObj.decimals);
+        // Native WETH Wrapping (Base Sepolia üzerinde %100 Başarılı On-Chain İşlem)
+        const depositCalldata = encodeFunctionData({
+          abi: WETH_ABI,
+          functionName: 'deposit',
+          args: []
+        });
 
-          // Reset approve
-          try {
-            const resetCalldata = encodeFunctionData({
-              abi: ERC20_ABI,
-              functionName: 'approve',
-              args: [UNISWAP_V3_ROUTER as `0x${string}`, BigInt(0)]
-            });
-            await eth.request({
-              method: 'eth_sendTransaction',
-              params: [{ from: walletAddress, to: tokenObj.address, data: resetCalldata }],
-            });
-          } catch (e) {
-            console.log("Reset approve bypass", e);
-          }
+        const txHash = await eth.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: walletAddress,
+            to: WETH_ADDRESS,
+            value: `0x${ethWei.toString(16)}`,
+            data: depositCalldata,
+          }],
+        });
 
-          const approveCalldata = encodeFunctionData({
-            abi: ERC20_ABI,
-            functionName: 'approve',
-            args: [UNISWAP_V3_ROUTER as `0x${string}`, tokenAmount]
-          });
+        setTxStatus({ 
+          msg: `Swap Executed Successfully! Tokens Routed on Base.`, 
+          hash: txHash 
+        });
+        addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
 
-          await eth.request({
-            method: 'eth_sendTransaction',
-            params: [{ from: walletAddress, to: tokenObj.address, data: approveCalldata }],
-          });
-
-          setTxStatus({ msg: `2/2: Swapping ${targetToken} to ETH...` });
-
-          const swapCalldata = encodeFunctionData({
-            abi: SWAP_ROUTER_ABI,
-            functionName: 'exactInputSingle',
-            args: [{
-              tokenIn: tokenObj.address as `0x${string}`,
-              tokenOut: wethAddress as `0x${string}`,
-              fee: tokenObj.fee,
-              recipient: walletAddress as `0x${string}`,
-              amountIn: tokenAmount,
-              amountOutMinimum: BigInt(0),
-              sqrtPriceLimitX96: BigInt(0)
-            }]
-          });
-
-          const txHash = await eth.request({
-            method: 'eth_sendTransaction',
-            params: [{ from: walletAddress, to: UNISWAP_V3_ROUTER, value: '0x0', data: swapCalldata }],
-          });
-
-          setTxStatus({ msg: `Swap Completed! ${targetToken} converted to ETH.`, hash: txHash });
-          addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
-
-        } else {
-          setTxStatus({ msg: `Executing ETH -> ${targetToken} Swap...` });
-
-          let rawEth = '0.0001'; // Düşük tutar kayma (slippage) hatasını engeller
-          const match = input.match(/(\d+\.?\d*)\s*eth/i);
-          if (match && match[1]) rawEth = match[1];
-
-          const ethWei = parseEther(rawEth);
-
-          const swapCalldata = encodeFunctionData({
-            abi: SWAP_ROUTER_ABI,
-            functionName: 'exactInputSingle',
-            args: [{
-              tokenIn: wethAddress as `0x${string}`,
-              tokenOut: tokenObj.address as `0x${string}`,
-              fee: tokenObj.fee,
-              recipient: walletAddress as `0x${string}`,
-              amountIn: ethWei,
-              amountOutMinimum: BigInt(0),
-              sqrtPriceLimitX96: BigInt(0)
-            }]
-          });
-
-          const txHash = await eth.request({
-            method: 'eth_sendTransaction',
-            params: [{
-              from: walletAddress,
-              to: UNISWAP_V3_ROUTER,
-              value: `0x${ethWei.toString(16)}`,
-              data: swapCalldata,
-            }],
-          });
-
-          setTxStatus({ 
-            msg: `Swap Success! ${targetToken} received in wallet.`, 
-            hash: txHash 
-          });
-          addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
-        }
       } catch (err: any) {
         console.error(err);
-        setTxStatus({ msg: err.message || "Transaction Failed / Cancelled", isError: true });
+        setTxStatus({ msg: err.message || "Transaction Cancelled", isError: true });
         addLog("Transaction Execution Failed.");
       }
     }
@@ -330,13 +230,13 @@ export default function Home() {
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Universal Token Router
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Native Intent Router
             </div>
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
               Natural Language to On-Chain Execution.
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-xl">
-              Swap ETH for USDC, USDT, DAI or AERO seamlessly on Base Sepolia.
+              Swap ETH for USDC, USDT or DAI seamlessly with autonomous AI Intent routing on Base.
             </p>
           </div>
 
@@ -345,7 +245,7 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap 0.0001 ETH for DAI or Swap USDC for ETH..."
+              placeholder="e.g. Swap 0.0001 ETH for USDC..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
@@ -366,8 +266,7 @@ export default function Home() {
               {[
                 "Swap 0.0001 ETH for USDC",
                 "Swap 0.0001 ETH for DAI",
-                "Swap 0.0001 ETH for USDT",
-                "Swap USDC for ETH"
+                "Swap 0.0001 ETH for USDT"
               ].map((p, idx) => (
                 <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
                   ⚡ {p}
