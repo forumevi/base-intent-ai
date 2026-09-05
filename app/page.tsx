@@ -1,9 +1,10 @@
 'use client';
 import { useState, useEffect } from 'react';
+import { encodeFunctionData, parseEther, parseUnits } from 'viem';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Router & Token Sözlüğü
+// Base Sepolia Uniswap V3 SwapRouter02 & Token Kataloğu
 const UNISWAP_V3_ROUTER = '0x94cC0aaC535CCDB3C01d6787d6413C739ae12bc4';
 const WETH_BASE_SEPOLIA = '0x4200000000000000000000000000000000000006';
 
@@ -13,6 +14,45 @@ const TOKEN_CATALOG: Record<string, { address: string; decimals: number }> = {
   DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18 },
   AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18 }
 };
+
+// Uniswap V3 SwapRouter02 ABI Yapısı
+const SWAP_ROUTER_ABI = [
+  {
+    inputs: [
+      {
+        components: [
+          { name: 'tokenIn', type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'fee', type: 'uint24' },
+          { name: 'recipient', type: 'address' },
+          { name: 'amountIn', type: 'uint256' },
+          { name: 'amountOutMinimum', type: 'uint256' },
+          { name: 'sqrtPriceLimitX96', type: 'uint160' }
+        ],
+        name: 'params',
+        type: 'tuple'
+      }
+    ],
+    name: 'exactInputSingle',
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    stateMutability: 'payable',
+    type: 'function'
+  }
+] as const;
+
+// ERC20 Approve ABI Yapısı
+const ERC20_ABI = [
+  {
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'value', type: 'uint256' }
+    ],
+    name: 'approve',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'nonpayable',
+    type: 'function'
+  }
+] as const;
 
 export default function Home() {
   const [input, setInput] = useState('');
@@ -25,7 +65,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "Bidirectional Uniswap V3 Engine: ETH ⇄ ERC20 Active"
+    "Strict ABI Encoding Active (Viem Swap Engine Operational)"
   ]);
 
   const addLog = (msg: string) => {
@@ -116,7 +156,7 @@ export default function Home() {
     }
   };
 
-  // ÇİFT YÖNLÜ DİNAMİK SWAP (ETH->ERC20 ve ERC20->ETH)
+  // TAM DÜZELTİLMİŞ SWAP FONKSİYONU (Viem ABI Encoding Kullanır)
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -132,81 +172,99 @@ export default function Home() {
       try {
         const text = input.toUpperCase();
         
-        // Cümleden Token Tespiti
-        let foundToken = 'USDC';
-        if (text.includes('USDT')) foundToken = 'USDT';
-        else if (text.includes('DAI')) foundToken = 'DAI';
-        else if (text.includes('AERO')) foundToken = 'AERO';
+        let targetToken = 'USDC';
+        if (text.includes('USDT')) targetToken = 'USDT';
+        else if (text.includes('DAI')) targetToken = 'DAI';
+        else if (text.includes('AERO')) targetToken = 'AERO';
 
-        const tokenObj = TOKEN_CATALOG[foundToken] || TOKEN_CATALOG.USDC;
-
-        // Yön Tespiti: "USDT ile ETH al" vs "ETH ile USDT al"
-        const isTokenToEth = text.includes(`${foundToken} FOR ETH`) || text.includes(`${foundToken} ILE ETH`) || (text.indexOf(foundToken) < text.indexOf('ETH') && text.indexOf(foundToken) !== -1);
-
-        const recipientClean = walletAddress.toLowerCase().replace('0x', '').padStart(64, '0');
-        const feeClean = '0000000000000000000000000000000000000000000000000000000000000bb8'; // %0.3 Havuz
+        const tokenObj = TOKEN_CATALOG[targetToken] || TOKEN_CATALOG.USDC;
+        const isTokenToEth = text.includes(`${targetToken} FOR ETH`) || text.includes(`${targetToken} ILE ETH`);
 
         if (isTokenToEth) {
-          // *** SENARYO 1: TOKEN (USDT/USDC) -> ETH TAKASI ***
-          setTxStatus({ msg: `1/2: Approving ${foundToken} for Uniswap Router...` });
-          addLog(`Step 1: Approving ${foundToken} to Router...`);
-
-          // 1. Step: ERC20 Approve (Harulda izni)
-          // approve(address spender, uint256 amount) selector: 0x095ea7b3
-          const routerClean = UNISWAP_V3_ROUTER.toLowerCase().replace('0x', '').padStart(64, '0');
-          const maxAmountClean = 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
-          const approveCalldata = `0x095ea7b3${routerClean}${maxAmountClean}`;
+          // *** SENARYO 1: TOKEN -> ETH ***
+          setTxStatus({ msg: `1/2: Approving ${targetToken}...` });
+          
+          const tokenAmount = parseUnits('10', tokenObj.decimals); // Örn: 10 Token
+          const approveCalldata = encodeFunctionData({
+            abi: ERC20_ABI,
+            functionName: 'approve',
+            args: [UNISWAP_V3_ROUTER as `0x${string}`, tokenAmount]
+          });
 
           await eth.request({
             method: 'eth_sendTransaction',
             params: [{ from: walletAddress, to: tokenObj.address, data: approveCalldata }],
           });
 
-          addLog(`Step 1 Approved! Executing Swap: ${foundToken} -> ETH...`);
-          setTxStatus({ msg: `2/2: Swapping ${foundToken} to ETH on-chain...` });
+          setTxStatus({ msg: `2/2: Swapping ${targetToken} to ETH...` });
 
-          // 2. Step: Token -> WETH Swap
-          const tokenInClean = tokenObj.address.toLowerCase().replace('0x', '').padStart(64, '0');
-          const tokenOutClean = WETH_BASE_SEPOLIA.toLowerCase().replace('0x', '').padStart(64, '0');
-          const swapCalldata = `0x04e45caf${tokenInClean}${tokenOutClean}${feeClean}${recipientClean}`;
+          const swapCalldata = encodeFunctionData({
+            abi: SWAP_ROUTER_ABI,
+            functionName: 'exactInputSingle',
+            args: [{
+              tokenIn: tokenObj.address as `0x${string}`,
+              tokenOut: WETH_BASE_SEPOLIA as `0x${string}`,
+              fee: 3000,
+              recipient: walletAddress as `0x${string}`,
+              amountIn: tokenAmount,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            }]
+          });
 
           const txHash = await eth.request({
             method: 'eth_sendTransaction',
             params: [{ from: walletAddress, to: UNISWAP_V3_ROUTER, value: '0x0', data: swapCalldata }],
           });
 
-          setTxStatus({ msg: `Swap Completed! ${foundToken} converted to ETH in wallet.`, hash: txHash });
-          addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
+          setTxStatus({ msg: `Swap Completed! Hash: ${txHash.substring(0, 10)}...`, hash: txHash });
 
         } else {
-          // *** SENARYO 2: ETH -> TOKEN (USDC/USDT/DAI) TAKASI ***
-          setTxStatus({ msg: "Executing ETH -> Token Swap in wallet..." });
+          // *** SENARYO 2: ETH -> TOKEN (USDC / USDT / DAI) ***
+          setTxStatus({ msg: "Broadcasting Uniswap V3 Swap Transaction..." });
 
-          // ETH Miktarını Dinamik Yakala (Varsayılan 0.0002 ETH)
-          let ethAmountWei = '0x2C68AF0BB14000';
+          // ETH Miktarını Yakala
+          let rawEth = '0.0002';
           const match = input.match(/(\d+\.?\d*)\s*eth/i);
-          if (match && match[1]) {
-            const val = parseFloat(match[1]);
-            if (!isNaN(val) && val > 0) ethAmountWei = '0x' + BigInt(Math.floor(val * 1e18)).toString(16);
-          }
+          if (match && match[1]) rawEth = match[1];
 
-          const tokenInClean = WETH_BASE_SEPOLIA.toLowerCase().replace('0x', '').padStart(64, '0');
-          const tokenOutClean = tokenObj.address.toLowerCase().replace('0x', '').padStart(64, '0');
-          const swapCalldata = `0x04e45caf${tokenInClean}${tokenOutClean}${feeClean}${recipientClean}`;
+          const ethWei = parseEther(rawEth); // BigInt Wei Formatına Çevirir
 
-          addLog(`Executing Uniswap V3 Swap: ETH -> ${foundToken}...`);
+          // Viem ile Kusursuz ABI-Encoding
+          const swapCalldata = encodeFunctionData({
+            abi: SWAP_ROUTER_ABI,
+            functionName: 'exactInputSingle',
+            args: [{
+              tokenIn: WETH_BASE_SEPOLIA as `0x${string}`,
+              tokenOut: tokenObj.address as `0x${string}`,
+              fee: 3000,
+              recipient: walletAddress as `0x${string}`,
+              amountIn: ethWei,
+              amountOutMinimum: 0n,
+              sqrtPriceLimitX96: 0n
+            }]
+          });
 
           const txHash = await eth.request({
             method: 'eth_sendTransaction',
-            params: [{ from: walletAddress, to: UNISWAP_V3_ROUTER, value: ethAmountWei, data: swapCalldata }],
+            params: [{
+              from: walletAddress,
+              to: UNISWAP_V3_ROUTER,
+              value: `0x${ethWei.toString(16)}`, // Wei Değeri Hex Çevrimi
+              data: swapCalldata,
+            }],
           });
 
-          setTxStatus({ msg: `Uniswap V3 Swap Executed! Real ${foundToken} balance updated.`, hash: txHash });
+          setTxStatus({ 
+            msg: `Swap Success! Real ${targetToken} balance incremented.`, 
+            hash: txHash 
+          });
           addLog(`TX Confirmed: ${txHash.substring(0, 10)}...`);
         }
       } catch (err: any) {
-        setTxStatus({ msg: err.message || "Transaction cancelled by user", isError: true });
-        addLog("Transaction Rejected.");
+        console.error(err);
+        setTxStatus({ msg: err.message || "Transaction Failed", isError: true });
+        addLog("Transaction Execution Failed.");
       }
     }
   };
@@ -218,12 +276,11 @@ export default function Home() {
       <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] bg-blue-600/15 rounded-full blur-[140px] pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[500px] h-[500px] bg-indigo-600/15 rounded-full blur-[140px] pointer-events-none" />
 
-      {/* Ticker Bar */}
+      {/* Top Header */}
       <div className="w-full bg-zinc-950/80 border-b border-zinc-800/60 backdrop-blur-md px-6 py-2 text-[11px] font-mono text-zinc-400 flex justify-between items-center overflow-x-auto z-10">
         <div className="flex items-center gap-6">
           <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-green-400 animate-ping"/> BASE NETWORK: <strong className="text-white">ONLINE</strong></span>
           <span>ETH/USD: <strong className="text-green-400">$2,845.20</strong></span>
-          <span>USDT/USD: <strong className="text-green-400">$1.00</strong></span>
           <span>AVG GAS: <strong className="text-blue-400">&lt; $0.001</strong></span>
         </div>
         <div className="hidden sm:flex items-center gap-4">
@@ -231,7 +288,6 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Header */}
       <header className="w-full max-w-7xl mx-auto flex justify-between items-center px-6 py-4 z-10">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">B</div>
@@ -252,23 +308,23 @@ export default function Home() {
               <button onClick={disconnectWallet} className="bg-red-950/50 hover:bg-red-900/80 border border-red-800/60 text-red-400 px-3 py-1.5 rounded-xl font-mono text-xs transition">Disconnect</button>
             </div>
           ) : (
-            <button onClick={connectWallet} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-lg transition">Connect Wallet</button>
+            <button onClick={connectWallet} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-semibold px-4 py-2 rounded-xl text-xs shadow-lg transition">Connect Wallet</button>
           )}
         </div>
       </header>
 
-      {/* Content */}
+      {/* Main Grid */}
       <div className="max-w-7xl w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 my-auto z-10">
         <div className="lg:col-span-7 flex flex-col justify-center space-y-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-950/40 border border-blue-500/30 rounded-full text-blue-400 text-xs font-mono mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Dual-Way Multi-Token Swap Supported
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" /> Fixed Calldata Encoding Engine
             </div>
             <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight mb-3 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-400">
               Natural Language to On-Chain Execution.
             </h1>
             <p className="text-zinc-400 text-sm leading-relaxed max-w-xl">
-              Type any swap intent (ETH to USDT/USDC/DAI or USDT to ETH). BaseIntent AI constructs the correct call parameters automatically.
+              Type your intent to swap ETH for USDC/USDT or vice versa.
             </p>
           </div>
 
@@ -277,12 +333,12 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="e.g. Swap USDT for ETH OR Swap 0.0002 ETH for USDC..."
+              placeholder="e.g. Swap 0.0002 ETH for USDC..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
               <div className="flex gap-1.5">
-                {["ETH⇄USDT", "ETH⇄USDC", "ETH⇄DAI"].map((tag, i) => (
+                {["Uniswap V3", "USDC", "USDT", "DAI"].map((tag, i) => (
                   <span key={i} className="text-[10px] font-mono bg-zinc-800/80 text-zinc-400 px-2 py-0.5 rounded-md">{tag}</span>
                 ))}
               </div>
@@ -292,15 +348,13 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Dinamik Test Önerileri */}
           <div className="space-y-2">
-            <p className="text-xs font-mono text-zinc-500">TEST SUGGESTIONS (BOTH DIRECTIONS):</p>
+            <p className="text-xs font-mono text-zinc-500">TEST INTENTS:</p>
             <div className="flex flex-wrap gap-2">
               {[
-                "Swap USDT for ETH",
+                "Swap 0.0002 ETH for USDC",
                 "Swap 0.0002 ETH for USDT",
-                "Swap 0.0002 ETH for DAI",
-                "Swap USDC for ETH"
+                "Swap 0.0002 ETH for DAI"
               ].map((p, idx) => (
                 <button key={idx} onClick={() => { setInput(p); handleExecute(p); }} className="text-xs bg-zinc-900/80 hover:bg-zinc-800 text-zinc-300 border border-zinc-800/80 px-3 py-1.5 rounded-xl transition font-mono">
                   ⚡ {p}
@@ -312,7 +366,7 @@ export default function Home() {
           <div className="bg-zinc-950/90 border border-zinc-800/80 rounded-2xl p-4 font-mono text-xs">
             <div className="flex justify-between items-center border-b border-zinc-800/60 pb-2 mb-3">
               <span className="text-zinc-500 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500" /> AGENT LOG STREAM</span>
-              <span className="text-[10px] text-zinc-600">WEBSOCKET ONLINE</span>
+              <span className="text-[10px] text-zinc-600">LIVE</span>
             </div>
             <div className="space-y-1.5 text-zinc-400 font-mono text-[11px] max-h-28 overflow-y-auto">
               {logs.map((log, i) => (<div key={i}>{log}</div>))}
@@ -320,7 +374,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Right Panel */}
+        {/* Right Execution Card */}
         <div className="lg:col-span-5 flex flex-col justify-center">
           {result ? (
             <div className="bg-zinc-950/90 border border-zinc-800/90 rounded-2xl p-6 shadow-2xl backdrop-blur-xl space-y-5">
@@ -338,7 +392,7 @@ export default function Home() {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
-                      <span className="text-[10px] font-mono text-zinc-500 block">ACTION TYPE</span>
+                      <span className="text-[10px] font-mono text-zinc-500 block">INTENT TYPE</span>
                       <span className="text-sm font-bold text-blue-400 font-mono">{result.intentType}</span>
                     </div>
                     <div className="bg-zinc-900/60 border border-zinc-800/80 p-3 rounded-xl">
@@ -348,7 +402,7 @@ export default function Home() {
                   </div>
 
                   <div>
-                    <h4 className="text-[11px] font-mono text-zinc-400 mb-1">AGENT SIMULATION</h4>
+                    <h4 className="text-[11px] font-mono text-zinc-400 mb-1">SIMULATION</h4>
                     <p className="text-xs text-zinc-300 bg-zinc-900/40 p-3 rounded-xl border border-zinc-800/60">{result.simulationSummary}</p>
                   </div>
                 </>
@@ -379,14 +433,14 @@ export default function Home() {
             <div className="bg-zinc-950/40 border border-dashed border-zinc-800/80 rounded-2xl p-8 text-center">
               <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 mx-auto flex items-center justify-center text-zinc-500 mb-3 font-mono">🤖</div>
               <h3 className="text-sm font-bold text-zinc-300 mb-1">Agent Standby Mode</h3>
-              <p className="text-xs text-zinc-500 max-w-xs mx-auto">Enter any swap command above to test ETH/USDT/USDC bidirectional execution.</p>
+              <p className="text-xs text-zinc-500 max-w-xs mx-auto">Enter an intent to execute strict ABI-encoded Uniswap V3 transactions.</p>
             </div>
           )}
         </div>
       </div>
 
       <footer className="w-full max-w-7xl mx-auto px-6 py-4 border-t border-zinc-900 flex justify-between items-center text-xs text-zinc-600 font-mono z-10">
-        <span>BaseIntent AI Engine v1.0.8</span>
+        <span>BaseIntent AI Engine v2.0.1</span>
         <span>Base Creator Grant Candidate</span>
       </footer>
     </main>
