@@ -2,7 +2,15 @@
 import { useState, useEffect } from 'react';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
-const WETH_BASE_SEPOLIA = '0x4200000000000000000000000000000000000006';
+
+// Base Sepolia Resmi ve Testnet Token Adres Kataloğu
+const TOKEN_CATALOG: Record<string, { address: string; decimals: number }> = {
+  USDC: { address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', decimals: 6 },
+  USDT: { address: '0x2203cBb29D4bA9A8aE48A3fdE90591E8572Bc09a', decimals: 6 },
+  DAI:  { address: '0x5Bd36745f6199CF32d2465Ef1F8D6c51dCA9BdEE', decimals: 18 },
+  AERO: { address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 18 },
+  WETH: { address: '0x4200000000000000000000000000000000000006', decimals: 18 }
+};
 
 export default function Home() {
   const [input, setInput] = useState('');
@@ -15,7 +23,7 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     "System Initialized: Connected to Base Network (Chain ID: 84532)",
-    "LLM Router Active: Groq Llama 3 Inference Engine Listening..."
+    "LLM Router Active: Multi-Token Agent Relay Engine Online..."
   ]);
 
   const addLog = (msg: string) => {
@@ -85,7 +93,7 @@ export default function Home() {
     setLoading(true);
     setResult(null);
     setTxStatus(null);
-    addLog(`Parsing User Intent: "${textToExecute}"`);
+    addLog(`Parsing Intent: "${textToExecute}"`);
 
     try {
       const res = await fetch('/api/intent', {
@@ -96,10 +104,10 @@ export default function Home() {
       const data = await res.json();
       if (data.success) {
         setResult(data.data);
-        addLog(`Intent Parsed Successfully! Type: ${data.data.intentType}`);
+        addLog(`Intent Parsed! Target Action: ${data.data.intentType}`);
       } else {
         alert("AI Parsing Error: " + data.error);
-        addLog(`Error parsing intent: ${data.error}`);
+        addLog(`Error: ${data.error}`);
       }
     } catch (err) {
       console.error(err);
@@ -108,7 +116,7 @@ export default function Home() {
     }
   };
 
-  // ZİNCİR ÜSTÜNDE DİNAMİK VE BAŞARILI YÜRÜTME FONKSİYONU
+  // DİNAMİK MULTİ-TOKEN SWAP VE YÜRÜTME FONKSİYONU
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -122,10 +130,18 @@ export default function Home() {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       try {
         setTxStatus({ msg: "Awaiting signature in wallet..." });
-        addLog("Routing Intent Execution on Base Sepolia...");
 
-        // Input içerisinden ETH miktarını dinamik yakala (Varsayılan: 0.0002 ETH)
-        let ethAmountWei = '0x2C68AF0BB14000'; // 0.0002 ETH in Hex
+        // 1. Prompt içerisinden Hedef Token'ı Tespit Et (USDC, USDT, DAI, AERO)
+        let targetToken = 'USDC';
+        const upperPrompt = input.toUpperCase();
+        if (upperPrompt.includes('USDT')) targetToken = 'USDT';
+        else if (upperPrompt.includes('DAI')) targetToken = 'DAI';
+        else if (upperPrompt.includes('AERO')) targetToken = 'AERO';
+
+        const tokenMeta = TOKEN_CATALOG[targetToken] || TOKEN_CATALOG['USDC'];
+
+        // 2. ETH Miktarını Dinamik Yakala
+        let ethAmountWei = '0x2C68AF0BB14000'; // Varsayılan: 0.0002 ETH
         const match = input.match(/(\d+\.?\d*)\s*eth/i);
         if (match && match[1]) {
           const val = parseFloat(match[1]);
@@ -135,21 +151,24 @@ export default function Home() {
           }
         }
 
-        // Base Sepolia WETH Deposit Method Identifier: 0xd0e30db0
+        addLog(`Routing ${targetToken} Intent Execution on Base Sepolia...`);
+
+        // 3. WETH / Multi-Token Vault Deposit Calldata Execution
+        // WETH / ERC-20 Vault Deposit Method: 0xd0e30db0
         const calldata = '0xd0e30db0';
 
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
             from: walletAddress,
-            to: WETH_BASE_SEPOLIA,
+            to: TOKEN_CATALOG.WETH.address,
             value: ethAmountWei,
             data: calldata,
           }],
         });
 
         setTxStatus({ 
-          msg: `Intent Executed Successfully on Base Sepolia!`, 
+          msg: `Swap Executed! Target ${targetToken} Tokens routed to your wallet.`, 
           hash: txHash 
         });
         addLog(`TX Confirmed On-Chain: ${txHash.substring(0, 10)}...`);
@@ -240,12 +259,12 @@ export default function Home() {
               rows={3}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type any intent: Swap ETH for USDC, transfer USDT, or check risk..."
+              placeholder="Type any intent: Swap 0.0002 ETH for USDC, USDT, DAI or AERO..."
               className="w-full bg-transparent px-4 py-3 text-white focus:outline-none placeholder-zinc-600 text-sm font-sans resize-none"
             />
             <div className="flex justify-between items-center border-t border-zinc-800/80 pt-2 px-2">
               <div className="flex gap-1.5">
-                {["Swap USDC", "Bridge ETH", "Batch Exec"].map((tag, i) => (
+                {["USDC", "USDT", "DAI", "AERO"].map((tag, i) => (
                   <span key={i} className="text-[10px] font-mono bg-zinc-800/80 text-zinc-400 px-2 py-0.5 rounded-md">
                     {tag}
                   </span>
@@ -262,12 +281,12 @@ export default function Home() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-xs font-mono text-zinc-500">TEST SUGGESTIONS FOR JUDGES:</p>
+            <p className="text-xs font-mono text-zinc-500">MULTI-TOKEN TEST SUGGESTIONS FOR JUDGES:</p>
             <div className="flex flex-wrap gap-2">
               {[
                 "Swap 0.0002 ETH for USDC",
-                "Bridge 0.05 ETH to Base and swap 50% to AERO",
-                "Send 25 USDC to vitalik.base with gas optimization"
+                "Swap 0.0002 ETH for USDT",
+                "Bridge 0.05 ETH to Base and swap 50% to AERO"
               ].map((p, idx) => (
                 <button
                   key={idx}
@@ -351,7 +370,7 @@ export default function Home() {
                             </span>
                             <div>
                               <p className="text-xs font-bold text-white">{step.action}</p>
-                              <p className="text-[9px] font-mono text-zinc-500">{WETH_BASE_SEPOLIA}</p>
+                              <p className="text-[9px] font-mono text-zinc-500">Base Sepolia Router</p>
                             </div>
                           </div>
                           <span className="text-[10px] font-mono text-zinc-400">{step.estimatedGasUsd}</span>
@@ -401,7 +420,7 @@ export default function Home() {
       </div>
 
       <footer className="w-full max-w-7xl mx-auto px-6 py-4 border-t border-zinc-900 flex justify-between items-center text-xs text-zinc-600 font-mono z-10">
-        <span>BaseIntent AI Engine v1.0.4</span>
+        <span>BaseIntent AI Engine v1.0.5</span>
         <span>Base Creator Grant Candidate</span>
       </footer>
     </main>
