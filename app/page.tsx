@@ -20,7 +20,6 @@ export default function Home() {
     'AWAITING_USER_INTENT: Connect Web3 Wallet to Execute On-Chain Actions'
   ]);
 
-  // Hydration hatasını ve cüzdanların yüklenme gecikmesini engellemek için
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -34,16 +33,22 @@ export default function Home() {
     }
   }, [isConnected, address]);
 
+  // Tek tıkla aktif cüzdana bağlanma
+  const handleConnect = () => {
+    const preferredConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
+    if (preferredConnector) {
+      connect({ connector: preferredConnector });
+    } else {
+      alert('Cüzdan eklentisi bulunamadı! Rabby veya MetaMask yüklü olduğundan emin olun.');
+    }
+  };
+
   const handleRunAgent = async (selectedPrompt?: string) => {
     const activePrompt = selectedPrompt || prompt;
     if (!activePrompt) return;
 
     if (!isConnected) {
-      if (connectors.length > 0) {
-        connect({ connector: connectors[0] });
-      } else {
-        alert('Lütfen cüzdan eklentinizi (Rabby / MetaMask) kontrol edin.');
-      }
+      handleConnect();
       return;
     }
 
@@ -71,7 +76,7 @@ export default function Home() {
 
       const txData = data.data?.aggregatorQuote?.transaction;
       if (!txData || !txData.to) {
-        throw new Error('API tarafından geçerli bir işlem verisi dönmedi.');
+        throw new Error('API geçerli bir işlem verisi dönmedi.');
       }
 
       setAgentLogs((prev) => [
@@ -95,7 +100,7 @@ export default function Home() {
 
     } catch (err: any) {
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'İşlem iptal edildi veya başarısız oldu'}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'İşlem başarısız'}`,
         ...prev
       ]);
     } finally {
@@ -108,7 +113,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[#030407] text-slate-100 flex flex-col items-center p-4 md:p-8 relative font-sans">
       
-      {/* HEADER */}
+      {/* HEADER - TEK BUTONLU TEMİZ TASARIM */}
       <div className="w-full max-w-2xl z-10 flex items-center justify-between py-4 px-6 rounded-2xl bg-slate-900/50 border border-slate-800 mb-8 shadow-xl">
         <div className="font-bold text-sm tracking-wide text-white flex items-center gap-2">
           🛡️ BASE INTENT AI
@@ -125,26 +130,12 @@ export default function Home() {
             </button>
           </div>
         ) : (
-          <div className="flex gap-2">
-            {connectors.length > 0 ? (
-              connectors.map((connector) => (
-                <button
-                  key={connector.uid}
-                  onClick={() => connect({ connector })}
-                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-md font-mono cursor-pointer"
-                >
-                  Connect ({connector.name}) 🔒
-                </button>
-              ))
-            ) : (
-              <button
-                onClick={() => alert('Cüzdan eklentisi bulunamadı!')}
-                className="text-xs bg-blue-600/50 text-white font-semibold px-4 py-2 rounded-xl font-mono"
-              >
-                Connect Wallet 🔒
-              </button>
-            )}
-          </div>
+          <button 
+            onClick={handleConnect}
+            className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-md font-mono cursor-pointer"
+          >
+            Connect Wallet 🔒
+          </button>
         )}
       </div>
 
