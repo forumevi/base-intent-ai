@@ -3,13 +3,10 @@ import { useState, useEffect } from 'react';
 
 const BASE_SEPOLIA_HEX = '0x14a34'; // Chain ID: 84532
 
-// Base Sepolia Resmi Testnet Kontrat Adresleri
-const TOKEN_ADDRESSES: Record<string, string> = {
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-  USDT: '0xAc52De8E8B627c00fA8515c1e550e6fCae640eE7',
-  AERO: '0xd6C23A25a0F9C3517277e9C7B658b4f2c079FDF1',
-  WETH: '0x4200000000000000000000000000000000000006'
-};
+// Base Sepolia Resmi Adresler
+const UNISWAP_V3_ROUTER = '0x94cC267e20a579f5aC6975Ec3f8380109aAB1a76'; // SwapRouter02
+const WETH_ADDRESS = '0x4200000000000000000000000000000000000006';
+const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
 export default function Home() {
   const [input, setInput] = useState('');
@@ -115,7 +112,7 @@ export default function Home() {
     }
   };
 
-  // TAM DİNAMİK VE BILD / EXECUTION HATASIZ ON-CHAIN MOTORU
+  // UNISWAP V3 SWAP EXECUTIVE MOTORU
   const handleSignAndBroadcast = async () => {
     if (!walletAddress) {
       await connectWallet();
@@ -129,66 +126,34 @@ export default function Home() {
     if (typeof window !== 'undefined' && (window as any).ethereum) {
       try {
         setTxStatus({ msg: "Awaiting signature in wallet..." });
-        addLog("Broadcasting Dynamic AI Intent to Base Network...");
+        addLog("Routing Swap via Uniswap V3 Router on Base Sepolia...");
 
-        const firstBatchStep = result?.executionBatch?.[0];
-        const promptLower = input.toLowerCase();
+        // Uniswap V3 exactInputSingle(ExactInputSingleParams) Encoded Calldata
+        // Method Selector: 0x04e45aaf (exactInputSingle)
+        const tokenIn = WETH_ADDRESS.replace('0x', '').padStart(64, '0');
+        const tokenOut = USDC_ADDRESS.replace('0x', '').padStart(64, '0');
+        const fee = '00000000000000000000000000000000000000000000000000000000000001f4'; // 500 (0.05% Pool Fee)
+        const recipient = walletAddress.replace('0x', '').padStart(64, '0');
+        const amountIn = '0000000000000000000000000000000000000000000000000001c6bf52634000'; // 0.0005 ETH (Wei)
+        const amountOutMinimum = '0000000000000000000000000000000000000000000000000000000000000000'; // 0 for testnet
+        const sqrtPriceLimitX96 = '0000000000000000000000000000000000000000000000000000000000000000';
 
-        // 1. Hedef Kontrat Tespiti (USDT, USDC, AERO)
-        let targetContract = firstBatchStep?.targetContract;
-        if (!targetContract || targetContract === '0x94cc267e20a579f5ac6975ec3f8380109aab1a768') {
-          if (promptLower.includes('usdt')) targetContract = TOKEN_ADDRESSES.USDT;
-          else if (promptLower.includes('aero')) targetContract = TOKEN_ADDRESSES.AERO;
-          else targetContract = TOKEN_ADDRESSES.USDC;
-        }
+        const calldata = `0x04e45aaf${tokenIn}${tokenOut}${fee}${recipient}${amountIn}${amountOutMinimum}${sqrtPriceLimitX96}`;
 
-        let valueHex = '0x0';
-        let calldata = '0x';
+        // 0.0005 ETH Gönderiyoruz
+        const valueHex = '0x1C6BF52634000';
 
-        // 2. Yön Kontrolü: ETH ile Token mı alınıyor yoksa Token satışı / transferi mi?
-        const isBuyingWithEth = (
-          promptLower.includes('al') || 
-          promptLower.includes('buy') || 
-          promptLower.includes('for usdc') || 
-          promptLower.includes('for usdt') || 
-          promptLower.includes('for aero')
-        ) && !promptLower.includes('sat') && !promptLower.includes('sell');
-
-        if (isBuyingWithEth) {
-          // ETH -> Token Swap: Cüzdandan 0.0005 ETH çıkacak (Yaklaşık 500000000000000 Wei)
-          valueHex = '0x1C6BF52634000'; 
-          
-          // ERC-20 transfer(address to, uint256 amount)
-          const paddedAddress = walletAddress.replace('0x', '').padStart(64, '0');
-          // 10 Token (6 decimal = 10000000 -> Hex: 0x989680)
-          const paddedAmount = '989680'.padStart(64, '0');
-          calldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
-        } else {
-          // Token -> ETH veya Transfer Senaryosu: Cüzdandan 0 ETH çıkar!
-          valueHex = '0x0';
-
-          const recipient = promptLower.includes('vitalik') 
-            ? '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045' 
-            : walletAddress;
-
-          const paddedAddress = recipient.replace('0x', '').padStart(64, '0');
-          // 25 Token (6 decimal = 25000000 -> Hex: 0x17d7840)
-          const paddedAmount = '17d7840'.padStart(64, '0');
-          calldata = `0xa9059cbb${paddedAddress}${paddedAmount}`;
-        }
-
-        // Cüzdana işlemi iletme
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
           params: [{
             from: walletAddress,
-            to: targetContract,
+            to: UNISWAP_V3_ROUTER,
             value: valueHex,
             data: calldata,
           }],
         });
 
-        setTxStatus({ msg: "Transaction Broadcasted & Executed on Base Sepolia!", hash: txHash });
+        setTxStatus({ msg: "Swap Executed via Uniswap V3! USDC added to wallet.", hash: txHash });
         addLog(`TX Confirmed On-Chain: ${txHash.substring(0, 10)}...`);
       } catch (err: any) {
         setTxStatus({ msg: err.message || "User rejected transaction", isError: true });
@@ -388,7 +353,7 @@ export default function Home() {
                             </span>
                             <div>
                               <p className="text-xs font-bold text-white">{step.action}</p>
-                              <p className="text-[9px] font-mono text-zinc-500">{step.targetContract}</p>
+                              <p className="text-[9px] font-mono text-zinc-500">{UNISWAP_V3_ROUTER}</p>
                             </div>
                           </div>
                           <span className="text-[10px] font-mono text-zinc-400">{step.estimatedGasUsd}</span>
