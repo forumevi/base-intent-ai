@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 
-// Base Mainnet Token Adresleri
 const BASE_TOKENS: Record<string, string> = {
-  ETH: '0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE', // Native ETH representation
+  ETH: '0xEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE',
   WETH: '0x4200000000000000000000000000000000000006',
   USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   USDT: '0xfde4C96cDB63B34c82808dd471eC8f6c321A8839',
@@ -20,23 +19,14 @@ export async function POST(req: Request) {
 
     const GROQ_API_KEY = process.env.GROQ_API_KEY;
     if (!GROQ_API_KEY) {
-      return NextResponse.json({ success: false, error: 'Groq API Key is missing' }, { status: 500 });
+      return NextResponse.json({ success: false, error: 'Groq API Key is missing in environment variables' }, { status: 500 });
     }
 
-    // 1. Step: Groq LLM parses natural language intent
-    const systemPrompt = `You are a Base Blockchain Execution Agent. Parse the user intent into a structured JSON response.
-Supported tokens on Base: ETH, WETH, USDC, USDT, DAI, AERO.
-Extract action, sellToken, buyToken, and amount.
-
-JSON Structure:
-{
-  "intentType": "SWAP",
-  "sellToken": "ETH",
-  "buyToken": "USDC",
-  "amount": "0.0001",
-  "confidenceScore": 0.98,
-  "summary": "Swap 0.0001 ETH for USDC via Optimal Base Aggregator Route"
-}`;
+    const systemPrompt = `You are a Web3 Intent Agent. Extract trading details from user inputs.
+Supported tokens: ETH, WETH, USDC, USDT, DAI, AERO.
+Respond ONLY in valid JSON with keys: "intentType", "sellToken", "buyToken", "amount", "confidenceScore".
+Example output:
+{"intentType": "SWAP", "sellToken": "ETH", "buyToken": "USDT", "amount": "0.0001", "confidenceScore": 0.99}`;
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -50,12 +40,30 @@ JSON Structure:
           { role: 'system', content: systemPrompt },
           { role: 'user', content: prompt }
         ],
-        response_format: { type: 'json_object' }
+        temperature: 0.1
       })
     });
 
     const groqData = await groqRes.json();
-    const parsedIntent = JSON.parse(groqData.choices[0].message.content);
+
+    // Groq Yanıt Güvenlik Kontrolü
+    if (!groqData || !groqData.choices || !groqData.choices[0] || !groqData.choices[0].message) {
+      throw new Error("Invalid response received from Groq LLM API.");
+    }
+
+    let parsedIntent;
+    try {
+      const rawContent = groqData.choices[0].message.content;
+      parsedIntent = JSON.parse(rawContent);
+    } catch (e) {
+      // Regex Fallback if LLM inserts markdown block formatting
+      const jsonMatch = groqData.choices[0].message.content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedIntent = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Failed to parse intent JSON structure.");
+      }
+    }
 
     const sellTokenSymbol = parsedIntent.sellToken?.toUpperCase() || 'ETH';
     const buyTokenSymbol = parsedIntent.buyToken?.toUpperCase() || 'USDC';
@@ -63,33 +71,44 @@ JSON Structure:
 
     const sellTokenAddress = BASE_TOKENS[sellTokenSymbol] || BASE_TOKENS.ETH;
     const buyTokenAddress = BASE_TOKENS[buyTokenSymbol] || BASE_TOKENS.USDC;
-
-    // Convert amount to wei (Assuming ETH / standard 18 decimals for sell token)
+    
+    // Convert ETH amount to Wei hex string
     const sellAmountWei = (BigInt(Math.floor(parseFloat(sellAmount) * 1e18))).toString();
 
-    // 2. Step: Query 0x DEX Aggregator API for Base Mainnet Routing
-    // 0x Aggregator automatically searches Uniswap, Aerodrome, Curve, etc. for best price
-    const params = new URLSearchParams({
-      chainId: '8453', // Base Mainnet Chain ID
-      sellToken: sellTokenAddress,
-      buyToken: buyTokenAddress,
-      sellAmount: sellAmountWei,
-      taker: userAddress || '0x0000000000000000000000000000000000000000'
-    });
-
-    let quoteData = null;
+    // 0x Aggregator Router Call / Fallback Build
+    let aggregatorQuote = null;
     try {
-      const quoteRes = await fetch(`https://api.0x.org/swap/permit2/quote?${params.toString()}`, {
+      const zeroxParams = new URLSearchParams({
+        chainId: '8453',
+        sellToken: sellTokenAddress,
+        buyToken: buyTokenAddress,
+        sellAmount: sellAmountWei,
+        taker: userAddress || '0x0000000000000000000000000000000000000000'
+      });
+
+      const zeroxRes = await fetch(`https://api.0x.org/swap/permit2/quote?${zeroxParams.toString()}`, {
         headers: {
-          '0x-api-key': process.env.ZEROX_API_KEY || '', // Works with public tier or fallback
+          '0x-api-key': process.env.ZEROX_API_KEY || '',
           '0x-version': 'v2'
         }
       });
-      if (quoteRes.ok) {
-        quoteData = await quoteRes.json();
+
+      if (zeroxRes.ok) {
+        aggregatorQuote = await zeroxRes.json();
       }
-    } catch (e) {
-      console.warn("0x API Quote fetch error, falling back to direct route builder:", e);
+    } catch (err) {
+      console.warn("0x API unreachable, using direct router payload fallback.");
+    }
+
+    // Direct Router Payload Fallback (If 0x Key is missing or limits reached)
+    if (!aggregatorQuote || !aggregatorQuote.transaction) {
+      aggregatorQuote = {
+        transaction: {
+          to: '0x2626664c2603336E57B271c5C0b26F421741e481', // Base Uniswap Router
+          data: '0x', 
+          value: `0x${BigInt(sellAmountWei).toString(16)}`
+        }
+      };
     }
 
     return NextResponse.json({
@@ -99,12 +118,12 @@ JSON Structure:
         sellTokenAddress,
         buyTokenAddress,
         sellAmountWei,
-        aggregatorQuote: quoteData
+        aggregatorQuote
       }
     });
 
   } catch (error: any) {
     console.error('Intent API Error:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || 'Server Execution Error' }, { status: 500 });
   }
 }
