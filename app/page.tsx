@@ -12,19 +12,18 @@ export default function Home() {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
   const [agentLogs, setAgentLogs] = useState<string[]>([
     'BASE_ENGINE_INIT: Base Agentic Execution Environment Active',
     'AI_MODEL_READY: Groq Llama 3.3 70B Quantized Engine Standby',
     'AWAITING_USER_INTENT: Connect Web3 Wallet to Execute On-Chain Actions'
   ]);
 
-  const handleConnectWallet = () => {
-    if (connectors && connectors.length > 0) {
-      connect({ connector: connectors[0] });
-    } else {
-      alert('Please install MetaMask or Rabby Wallet!');
-    }
-  };
+  // Hydration hatasını ve cüzdanların yüklenme gecikmesini engellemek için
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (isConnected && address) {
@@ -40,7 +39,11 @@ export default function Home() {
     if (!activePrompt) return;
 
     if (!isConnected) {
-      handleConnectWallet();
+      if (connectors.length > 0) {
+        connect({ connector: connectors[0] });
+      } else {
+        alert('Lütfen cüzdan eklentinizi (Rabby / MetaMask) kontrol edin.');
+      }
       return;
     }
 
@@ -63,12 +66,12 @@ export default function Home() {
       const data = await res.json();
 
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to process AI intent');
+        throw new Error(data.error || 'Intent işlenirken hata oluştu');
       }
 
       const txData = data.data?.aggregatorQuote?.transaction;
       if (!txData || !txData.to) {
-        throw new Error('Invalid transaction data received from API');
+        throw new Error('API tarafından geçerli bir işlem verisi dönmedi.');
       }
 
       setAgentLogs((prev) => [
@@ -92,13 +95,15 @@ export default function Home() {
 
     } catch (err: any) {
       setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'Transaction failed'}`,
+        `[${new Date().toLocaleTimeString()}] EXECUTION_ERROR: ${err.message || 'İşlem iptal edildi veya başarısız oldu'}`,
         ...prev
       ]);
     } finally {
       setLoading(false);
     }
   };
+
+  if (!mounted) return null;
 
   return (
     <main className="min-h-screen bg-[#030407] text-slate-100 flex flex-col items-center p-4 md:p-8 relative font-sans">
@@ -120,12 +125,26 @@ export default function Home() {
             </button>
           </div>
         ) : (
-          <button 
-            onClick={handleConnectWallet}
-            className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-md font-mono cursor-pointer"
-          >
-            Connect Wallet 🔒
-          </button>
+          <div className="flex gap-2">
+            {connectors.length > 0 ? (
+              connectors.map((connector) => (
+                <button
+                  key={connector.uid}
+                  onClick={() => connect({ connector })}
+                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-xl transition shadow-md font-mono cursor-pointer"
+                >
+                  Connect ({connector.name}) 🔒
+                </button>
+              ))
+            ) : (
+              <button
+                onClick={() => alert('Cüzdan eklentisi bulunamadı!')}
+                className="text-xs bg-blue-600/50 text-white font-semibold px-4 py-2 rounded-xl font-mono"
+              >
+                Connect Wallet 🔒
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -160,13 +179,19 @@ export default function Home() {
 
           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
             <button
-              onClick={() => { setPrompt('Swap 0.0001 ETH for USDC'); handleRunAgent('Swap 0.0001 ETH for USDC'); }}
+              onClick={() => { 
+                setPrompt('Swap 0.0001 ETH for USDC'); 
+                handleRunAgent('Swap 0.0001 ETH for USDC'); 
+              }}
               className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-blue-500 text-left text-slate-300 transition cursor-pointer"
             >
               🔄 Swap 0.0001 ETH ➔ USDC
             </button>
             <button
-              onClick={() => { setPrompt('Swap 1 USDC for ETH'); handleRunAgent('Swap 1 USDC for ETH'); }}
+              onClick={() => { 
+                setPrompt('Swap 1 USDC for ETH'); 
+                handleRunAgent('Swap 1 USDC for ETH'); 
+              }}
               className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-blue-500 text-left text-slate-300 transition cursor-pointer"
             >
               🔄 Swap 1 USDC ➔ ETH
