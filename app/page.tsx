@@ -8,7 +8,7 @@ export default function Home() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const { connect, connectors, error: connectError } = useConnect();
+  const { connect, connectors } = useConnect();
   const { disconnect } = useDisconnect();
   const { sendTransactionAsync } = useSendTransaction();
 
@@ -40,14 +40,18 @@ export default function Home() {
     }
   }, [isConnected, isMainnet]);
 
-  // Esnek ve Güvenli Cüzdan Bağlama Fonksiyonu
-  const handleConnect = () => {
-    if (connectors.length > 0) {
-      // Önce injected veya ilk bulunan connector ile bağlan
-      const targetConnector = connectors.find((c) => c.id === 'injected') || connectors[0];
-      connect({ connector: targetConnector });
-    } else {
-      alert('Cüzdan eklentisi (MetaMask/Rabby) tespit edilemedi!');
+  // Kesin Bağlantı Tetikleyici
+  const handleConnect = async () => {
+    try {
+      if (connectors && connectors.length > 0) {
+        // En uygun konnektörü seç veya doğrudan ilkini bağla
+        const activeConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
+        connect({ connector: activeConnector });
+      } else {
+        alert('Cüzdan eklentisi (MetaMask/Rabby) taptatlı bir şekilde algılanamadı. Lütfen eklentinizin aktif olduğundan emin olun.');
+      }
+    } catch (err: any) {
+      console.error('Wallet connection error:', err);
     }
   };
 
@@ -171,6 +175,7 @@ export default function Home() {
           {isConnected && (
             <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
               <button
+                type="button"
                 onClick={() => switchChain?.({ chainId: baseSepolia.id })}
                 className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
                   isSepolia 
@@ -181,6 +186,7 @@ export default function Home() {
                 Sepolia
               </button>
               <button
+                type="button"
                 onClick={() => switchChain?.({ chainId: base.id })}
                 className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
                   isMainnet 
@@ -195,18 +201,25 @@ export default function Home() {
 
           {isConnected ? (
             <button 
+              type="button"
               onClick={() => disconnect()}
               className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 font-mono px-3.5 py-1.5 rounded-xl border border-red-500/30 transition cursor-pointer"
             >
               {address?.slice(0, 6)}...{address?.slice(-4)}
             </button>
           ) : (
-            <button 
-              onClick={handleConnect}
-              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
-            >
-              Connect Wallet 🔒
-            </button>
+            <div className="flex items-center gap-1">
+              {connectors.map((connector) => (
+                <button
+                  key={connector.id}
+                  type="button"
+                  onClick={() => connect({ connector })}
+                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
+                >
+                  Connect {connector.name.replace('Injected', 'Wallet')} 🔒
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </header>
@@ -224,6 +237,7 @@ export default function Home() {
             </div>
           </div>
           <button
+            type="button"
             onClick={() => switchChain?.({ chainId: baseSepolia.id })}
             className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 font-bold shrink-0 transition"
           >
@@ -263,6 +277,7 @@ export default function Home() {
             />
             
             <button
+              type="button"
               onClick={() => handleRunAgent()}
               disabled={loading}
               className="absolute bottom-4 right-4 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 disabled:opacity-40 transition-all font-mono cursor-pointer flex items-center gap-2"
@@ -279,6 +294,7 @@ export default function Home() {
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
               <button
+                type="button"
                 onClick={() => { 
                   const p = 'Swap 0.0001 ETH for USDC';
                   setPrompt(p); 
@@ -294,6 +310,7 @@ export default function Home() {
               </button>
 
               <button
+                type="button"
                 onClick={() => { 
                   const p = 'Swap 0.0001 ETH for USDT';
                   setPrompt(p); 
@@ -309,6 +326,7 @@ export default function Home() {
               </button>
 
               <button
+                type="button"
                 onClick={() => { 
                   const p = 'Swap 0.0001 ETH for DAI';
                   setPrompt(p); 
@@ -324,6 +342,7 @@ export default function Home() {
               </button>
 
               <button
+                type="button"
                 onClick={() => { 
                   const p = 'Swap 0.0001 ETH for AERO';
                   setPrompt(p); 
