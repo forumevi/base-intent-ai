@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther, parseUnits, getAddress } from 'viem';
 
+// Base Mainnet Doğru Havuz Fee Tier'ları
 const BASE_TOKENS: Record<string, { address: `0x${string}`; fee: number; decimals: number }> = {
   ETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
   WETH: { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
-  USDC: { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), fee: 500, decimals: 6 },
-  USDT: { address: getAddress('0xfde4C96cDB63B34c82808dd471eC8f6c321A8839'), fee: 500, decimals: 6 },
+  USDC: { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), fee: 500, decimals: 6 },  // %0.05
+  USDT: { address: getAddress('0xfde4C96cDB63B34c82808dd471eC8f6c321A8839'), fee: 3000, decimals: 6 }, // Base'de WETH/USDT %0.30 (3000) fee tier kullanır
   DAI:  { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), fee: 500, decimals: 18 },
   AERO: { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), fee: 3000, decimals: 18 }
 };
@@ -38,36 +39,29 @@ function parseGroundedIntent(prompt: string) {
   const cleanPrompt = prompt.trim();
   const lower = cleanPrompt.toLowerCase();
 
-  // Prompt içerisindeki rakamı al (Örn: "1 usdc..." -> 1)
   const amountMatch = cleanPrompt.match(/(\d+(\.\d+)?)/);
   const targetAmount = amountMatch ? amountMatch[0] : '0.0001';
 
   let sellToken = 'ETH';
   let buyToken = 'USDC';
 
-  // Türkçe / İngilizce "AL / BUY" Tespiti
   const isBuyIntent = lower.includes('al') || lower.includes('buy') || lower.includes('get');
 
   if (isBuyIntent) {
-    // Örn: "1 usdc al eth ile" -> Rakamdan hemen sonraki token Alınacak Token'dır.
-    if (lower.includes('usdc')) buyToken = 'USDC';
-    else if (lower.includes('usdt')) buyToken = 'USDT';
+    if (lower.includes('usdt')) buyToken = 'USDT';
+    else if (lower.includes('usdc')) buyToken = 'USDC';
     else if (lower.includes('dai')) buyToken = 'DAI';
     else if (lower.includes('aero')) buyToken = 'AERO';
 
-    // Ödeme aracı olan token'ı tespit et
     if (lower.includes('eth ile') || lower.includes('with eth') || lower.includes('pay eth')) {
       sellToken = 'ETH';
-    } else if (lower.includes('usdc ile')) {
-      sellToken = 'USDC';
     }
   } else {
-    // Standart "SWAP/SAT" Cümle Yapısı (Örn: "0.001 eth swap to usdc")
     if (lower.includes('eth')) sellToken = 'ETH';
-    if (lower.includes('usdc')) buyToken = 'USDC';
     if (lower.includes('usdt')) buyToken = 'USDT';
-    if (lower.includes('dai')) buyToken = 'DAI';
-    if (lower.includes('aero')) buyToken = 'AERO';
+    else if (lower.includes('usdc')) buyToken = 'USDC';
+    else if (lower.includes('dai')) buyToken = 'DAI';
+    else if (lower.includes('aero')) buyToken = 'AERO';
   }
 
   return {
@@ -89,15 +83,13 @@ export async function POST(req: Request) {
     const intent = parseGroundedIntent(prompt);
     
     const sellTokenObj = BASE_TOKENS[intent.sellToken] || BASE_TOKENS.ETH;
-    const buyTokenObj = BASE_TOKENS[intent.buyToken] || BASE_TOKENS.USDC;
+    const buyTokenObj = BASE_TOKENS[intent.buyToken] || BASE_TOKENS.USDT;
 
-    // Yaklaşık ETH/USD kuru hesaplama (1 USDC/USDT almak için gereken ~ETH miktarı)
-    // 1 ETH ≈ $2500 kabulü üzerinden dynamic wei hesabı
     let sellAmountWei: bigint;
 
     if (intent.isBuyIntent && intent.sellToken === 'ETH') {
-      const targetBuyAmount = parseFloat(intent.amount); // Örn: 1 USDC
-      const estimatedEthRequired = targetBuyAmount / 2500; // ~0.0004 ETH
+      const targetBuyAmount = parseFloat(intent.amount);
+      const estimatedEthRequired = targetBuyAmount / 2500;
       sellAmountWei = parseEther(estimatedEthRequired.toFixed(8));
     } else {
       sellAmountWei = intent.sellToken === 'ETH' 
@@ -109,13 +101,14 @@ export async function POST(req: Request) {
       ? getAddress(userAddress) 
       : getAddress('0x0000000000000000000000000000000000000000');
 
+    // Uniswap V3 Swap Parametreleri
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
         tokenIn: getAddress(sellTokenObj.address),
         tokenOut: getAddress(buyTokenObj.address),
-        fee: buyTokenObj.fee,
+        fee: buyTokenObj.fee, // USDT için artırılan 3000 fee uygulanır
         recipient: validUserAddress,
         amountIn: sellAmountWei,
         amountOutMinimum: BigInt(0),
