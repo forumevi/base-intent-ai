@@ -2,13 +2,13 @@ import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
-// 1. Base Mainnet RPC Client (On-chain Bakiye ve Kontrat Okumaları İçin)
+// 1. Base Mainnet RPC Client
 const publicClient = createPublicClient({
   chain: base,
   transport: http('https://mainnet.base.org')
 });
 
-// 2. Desteklenen Tokenlar ve Kontrat Adresleri
+// 2. Desteklenen Tokenlar
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
   ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
   WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
@@ -18,14 +18,14 @@ const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> 
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
 
-// 3. Token Çiftine Özel Doğru Uniswap V3 Fee Tespiti (Simülasyon Hatalarını Önler)
+// 3. Token Çiftine Özel Dynamic Fee Tespiti
 function getOptimalFeeTier(sellToken: string, buyToken: string): number {
   const pair = `${sellToken}-${buyToken}`;
   
-  if (pair.includes('AERO')) return 3000;    // AERO havuzları genelde %0.30
-  if (pair.includes('CBETH')) return 500;    // cbETH/ETH havuzları %0.05
-  if (pair.includes('DAI')) return 100;      // Stablecoin / DAI havuzları %0.01 veya %0.05
-  return 500;                                // Standart %0.05 (USDC/ETH vb.)
+  if (pair.includes('AERO')) return 3000;
+  if (pair.includes('CBETH')) return 500;
+  if (pair.includes('DAI')) return 100;
+  return 500;
 }
 
 const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
@@ -64,7 +64,7 @@ const ERC20_ABI = [
   }
 ] as const;
 
-// 4. Groq API - Yedekli (Fallback) LLM Çağrısı
+// 4. Groq Fallback LLM Çağrısı
 async function fetchLLMWithFallback(apiKey: string, prompt: string) {
   const models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
   const systemPrompt = `
@@ -110,7 +110,7 @@ async function fetchLLMWithFallback(apiKey: string, prompt: string) {
         return JSON.parse(data.choices[0].message.content);
       }
     } catch (err) {
-      console.warn(`Model ${model} failed, trying next fallback...`);
+      console.warn(`Model ${model} failed, trying next...`);
     }
   }
 
@@ -129,7 +129,6 @@ export async function POST(req: Request) {
       }, { status: 500 });
     }
 
-    // 1. LLM ile Niyeti Ayrıştır
     const parsedIntent = await fetchLLMWithFallback(apiKey, prompt);
 
     const sellToken = (parsedIntent.sellToken || 'ETH').toUpperCase();
@@ -138,7 +137,6 @@ export async function POST(req: Request) {
     const sellObj = BASE_TOKENS[sellToken] || BASE_TOKENS.ETH;
     const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.USDC;
 
-    // 2. On-Chain Gerçek Bakiye Kontrolü ("Tüm bakiyem ile al" durumları için)
     let amountInWei: bigint;
     let finalAmountStr = String(parsedIntent.amount || '0.0001');
 
@@ -146,7 +144,6 @@ export async function POST(req: Request) {
       if (userAddress && userAddress.startsWith('0x')) {
         if (sellToken === 'ETH') {
           const balance = await publicClient.getBalance({ address: getAddress(userAddress) });
-          // Gas ücreti (yaklaşık 0.0005 ETH) düşülüyor
           amountInWei = balance > parseUnits('0.0005', 18) ? balance - parseUnits('0.0005', 18) : BigInt(0);
         } else {
           const balance = await publicClient.readContract({
@@ -173,14 +170,12 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // 3. Doğru Havuz Fee Seçimi
     const feeTier = getOptimalFeeTier(sellToken, buyToken);
 
     const recipientAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
       : UNISWAP_ROUTER;
 
-    // 4. Swap Calldata Üretimi
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
@@ -195,8 +190,35 @@ export async function POST(req: Request) {
       }]
     });
 
-    // 5. UI ve Cüzdan İçin Tam Veri Paketleme
     return NextResponse.json({
       success: true,
       data: {
         ...parsedIntent,
+        to: UNISWAP_ROUTER,
+        data: swapCalldata,
+        value: sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0',
+        sellToken,
+        buyToken,
+        amount: finalAmountStr,
+        sellTokenAddress: sellObj.address,
+        amountInWei: amountInWei.toString(),
+        executionBatch: [
+          {
+            step: 1,
+            action: `Swap ${finalAmountStr} ${sellToken} for ${buyToken}`,
+            targetContract: UNISWAP_ROUTER,
+            estimatedGasUsd: "$0.01",
+            details: { calldata: swapCalldata }
+          }
+        ]
+      }
+    });
+
+  } catch (error: any) {
+    console.error("API Intent Error:", error);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || "Intent işlenirken beklenmeyen bir hata oluştu." 
+    }, { status: 500 });
+  }
+}
