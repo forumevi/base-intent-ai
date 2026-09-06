@@ -1,17 +1,16 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 
-// Base Token Adresleri
+// Base Mainnet Adresleri
 const WETH = getAddress('0x4200000000000000000000000000000000000006');
-const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const CBETH = getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498');
+const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 const DAI = getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb');
-const AERO = getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58');
 
-// Aerodrome V2 Router (Base Mainnet)
+// Aerodrome V2 Router & Factory (Base)
 const AERODROME_ROUTER = getAddress('0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43');
+const AERODROME_FACTORY = getAddress('0x420DD381b31a868D039F8354386965E9463264d7'); // Gerçek Pool Factory Adresi
 
-// Aerodrome Router V2 ABI
 const AERODROME_ROUTER_ABI = [
   {
     inputs: [
@@ -36,52 +35,48 @@ const AERODROME_ROUTER_ABI = [
   }
 ] as const;
 
-// Base Aerodrome V2 Pool Yapılandırma Haritası
-// cbETH/WETH -> Stable Pool (true)
-// USDC/WETH -> Volatile Pool (false)
-const POOL_CONFIG: Record<string, { address: `0x${string}`; isStable: boolean }> = {
-  CBETH: { address: CBETH, isStable: true },
-  USDC:  { address: USDC, isStable: false },
-  DAI:   { address: DAI, isStable: true },
-  AERO:  { address: AERO, isStable: false }
-};
-
 export async function POST(req: Request) {
   try {
     const { prompt, userAddress } = await req.json();
 
-    // Token Tespiti
-    let buyToken = "CBETH";
-    if (prompt.includes("USDC")) buyToken = "USDC";
-    if (prompt.includes("DAI")) buyToken = "DAI";
-    if (prompt.includes("AERO")) buyToken = "AERO";
+    // 1. Hedef Token ve Havuz Türü Belirleme
+    let buyTokenAddress = CBETH;
+    let isStablePool = true; // cbETH / WETH Aerodrome'da Stable Pool'dur
 
-    const tokenConfig = POOL_CONFIG[buyToken] || POOL_CONFIG.CBETH;
+    if (prompt?.includes("USDC")) {
+      buyTokenAddress = USDC;
+      isStablePool = false;
+    } else if (prompt?.includes("DAI")) {
+      buyTokenAddress = DAI;
+      isStablePool = true;
+    }
+
     const amountInWei = parseUnits("0.0001", 18);
-    const recipient = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : AERODROME_ROUTER;
+    
+    // Recipient kesinlikle geçerli bir kullanıcı adresi olmalı (Fallback: Kullanıcı cüzdanı)
+    const recipient = (userAddress && userAddress.startsWith('0x')) 
+      ? getAddress(userAddress) 
+      : getAddress('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa'); // Loglarındaki cüzdanın
 
-    // Aerodrome V2 Factory Adresi
-    const AERODROME_FACTORY = getAddress('0x4200000000000000000000000000000000000006'); // Default Pool Factory
+    // 2. Gelecek Zamanlı Deadline (10 Dakika)
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
-    // 20 Dakikalık Geçerli Deadline (Aksi takdirde Revert eder)
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
-
-    // Aerodrome Rota Dizisi
+    // 3. Aerodrome Rota Objesi (Doğru Factory ve Stable Flag)
     const routes = [
       {
         from: WETH,
-        to: tokenConfig.address,
-        stable: tokenConfig.isStable,
-        factory: '0x4200000000000000000000000000000000000006' as `0x${string}` // Standard Aerodrome V2 Pool
+        to: buyTokenAddress,
+        stable: isStablePool,
+        factory: AERODROME_FACTORY
       }
     ];
 
-    // Calldata Encode İşlemi
+    // 4. Calldata Encode
     const swapCalldata = encodeFunctionData({
       abi: AERODROME_ROUTER_ABI,
       functionName: 'swapExactETHForTokens',
       args: [
-        BigInt(0), // amountOutMin (Slippage hatasını engeller)
+        BigInt(0), // amountOutMin
         routes,
         recipient,
         deadline
@@ -95,12 +90,12 @@ export async function POST(req: Request) {
         data: swapCalldata,
         value: `0x${amountInWei.toString(16)}`,
         sellToken: "ETH",
-        buyToken: buyToken,
+        buyToken: prompt?.includes("USDC") ? "USDC" : "CBETH",
         amount: "0.0001",
         executionBatch: [
           {
             step: 1,
-            action: `Swap 0.0001 ETH for ${buyToken} on Aerodrome`,
+            action: "Swap 0.0001 ETH on Aerodrome",
             targetContract: AERODROME_ROUTER,
             estimatedGasUsd: "$0.01",
             details: { calldata: swapCalldata }
@@ -110,6 +105,6 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Routing Failed" }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Execution Failed" }, { status: 500 });
   }
 }
