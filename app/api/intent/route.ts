@@ -44,15 +44,11 @@ async function parseIntentWithLLM(prompt: string) {
   }
 
   const systemPrompt = `You are a DeFi Intent Engine on Base Mainnet.
-Return ONLY a valid JSON object without markdown formatting.
-JSON schema:
-{
-  "sellToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
-  "buyToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
-  "amount": "string number representation (e.g. 0.0001 or 1)"
-}
+Analyze the user request and return ONLY a valid raw JSON object without markdown formatting, quotes or markdown blocks.
+JSON format:
+{"sellToken": "ETH", "buyToken": "USDC", "amount": "0.0001"}
 
-Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount": "1"}`;
+Tokens supported: ETH, USDC, CBETH, DAI, AERO.`;
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -61,8 +57,7 @@ Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama-3.1-8b-instant',
-      response_format: { type: 'json_object' },
+      model: 'llama-3.3-70b-specdec',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
@@ -75,11 +70,13 @@ Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount
 
   if (!response.ok || !data.choices || !data.choices.length || !data.choices[0]?.message?.content) {
     console.error('Groq API Error Response:', JSON.stringify(data));
-    throw new Error(data.error?.message || 'Invalid response received from Groq LLM API');
+    throw new Error(data.error?.message || 'Invalid response from Groq LLM API');
   }
 
   const rawContent = data.choices[0].message.content.trim();
-  const parsed = JSON.parse(rawContent);
+  const cleanedJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+  
+  const parsed = JSON.parse(cleanedJson);
 
   return {
     sellToken: (parsed.sellToken || 'ETH').toUpperCase(),
