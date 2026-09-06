@@ -32,13 +32,6 @@ const SWAP_ROUTER_ABI = [
     outputs: [{ name: 'amountOut', type: 'uint256' }],
     stateMutability: 'payable',
     type: 'function'
-  },
-  {
-    inputs: [{ name: 'data', type: 'bytes[]' }],
-    name: 'multicall',
-    outputs: [{ name: 'results', type: 'bytes[]' }],
-    stateMutability: 'payable',
-    type: 'function'
   }
 ] as const;
 
@@ -111,11 +104,11 @@ export async function POST(req: Request) {
       ? parseEther(intent.amount) 
       : parseUnits(intent.amount, sellTokenObj.decimals);
 
-    // Address Checksum Correction
     const validUserAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
       : getAddress('0x0000000000000000000000000000000000000000');
 
+    // Multicall kullanmadan doğrudan exactInputSingle calldata hazırlama
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
@@ -130,16 +123,10 @@ export async function POST(req: Request) {
       }]
     });
 
-    const multicallCalldata = encodeFunctionData({
-      abi: SWAP_ROUTER_ABI,
-      functionName: 'multicall',
-      args: [[swapCalldata]]
-    });
-
     const aggregatorQuote = {
       transaction: {
-        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Base SwapRouter02 Checksummed
-        data: multicallCalldata,
+        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Base SwapRouter02
+        data: swapCalldata,
         value: intent.sellToken === 'ETH' ? `0x${sellAmountWei.toString(16)}` : '0x0'
       }
     };
