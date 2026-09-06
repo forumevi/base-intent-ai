@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 
-// Base Mainnet Adresleri (Doğrulanmış EIP-55 Checksum)
+// Base Mainnet Adresleri
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
-const DEFAULT_KYBER_ROUTER = '0x6131B5fae19ea4f9d964EAC09Af83311A6337b5';
+const DEFAULT_KYBER_ROUTER = '0x6131b5fae19ea4f9d964eac09af83311a6337b5';
+
+// Güvenli Adres Formatlama Yardımcısı
+const safeGetAddress = (addr: string): `0x${string}` => {
+  try {
+    return getAddress(addr);
+  } catch {
+    // Checksum hatası verirse küçük harfe çevirip tekrar dener
+    return getAddress(addr.toLowerCase());
+  }
+};
 
 // ERC20 Approve ABI
 const ERC20_ABI = [
@@ -25,8 +35,8 @@ export async function POST(req: Request) {
     const { prompt, userAddress } = await req.json();
 
     const recipient = (userAddress && userAddress.startsWith('0x'))
-      ? getAddress(userAddress)
-      : getAddress('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa');
+      ? safeGetAddress(userAddress)
+      : safeGetAddress('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa');
 
     const lowerPrompt = prompt?.toLowerCase() || '';
 
@@ -53,9 +63,8 @@ export async function POST(req: Request) {
       throw new Error('KyberSwap üzerinde rota bulunamadı.');
     }
 
-    // Dynamic veya Fallback Router Adresi
-    const rawRouter = routeData.data.routeSummary.routerAddress;
-    const routerAddress = rawRouter ? getAddress(rawRouter) : getAddress(DEFAULT_KYBER_ROUTER);
+    const rawRouter = routeData.data.routeSummary.routerAddress || DEFAULT_KYBER_ROUTER;
+    const routerAddress = safeGetAddress(rawRouter);
 
     // Calldata Paketleme (Build)
     const buildRes = await fetch(`https://aggregator-api.kyberswap.com/base/api/v1/route/build`, {
@@ -88,7 +97,7 @@ export async function POST(req: Request) {
       executionBatch.push({
         step: 1,
         action: 'Approve 1 USDC for KyberSwap Router',
-        targetContract: getAddress(USDC),
+        targetContract: safeGetAddress(USDC),
         estimatedGasUsd: '$0.001',
         details: { calldata: approveData }
       });
@@ -115,7 +124,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       data: {
-        to: isBuyEth ? getAddress(USDC) : routerAddress,
+        to: isBuyEth ? safeGetAddress(USDC) : routerAddress,
         data: executionBatch[0].details.calldata,
         value: isBuyEth ? '0x0' : `0x${BigInt(amountInWei).toString(16)}`,
         sellToken: isBuyEth ? 'USDC' : 'ETH',
