@@ -44,7 +44,7 @@ async function parseIntentWithLLM(prompt: string) {
   }
 
   const systemPrompt = `You are a DeFi Intent Engine on Base Mainnet.
-Return ONLY a valid JSON object. No prose, no markdown fences.
+Return ONLY a valid JSON object without markdown formatting.
 JSON schema:
 {
   "sellToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
@@ -61,7 +61,8 @@ Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama-3.1-70b-versatile',
+      model: 'llama-3.1-8b-instant',
+      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
@@ -72,15 +73,13 @@ Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount
 
   const data = await response.json();
 
-  if (!response.ok || !data.choices || !data.choices[0]) {
-    console.error('Groq API Error Response:', data);
-    throw new Error(data.error?.message || 'Invalid response from Groq LLM API');
+  if (!response.ok || !data.choices || !data.choices.length || !data.choices[0]?.message?.content) {
+    console.error('Groq API Error Response:', JSON.stringify(data));
+    throw new Error(data.error?.message || 'Invalid response received from Groq LLM API');
   }
 
   const rawContent = data.choices[0].message.content.trim();
-  const cleanedJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
-  
-  const parsed = JSON.parse(cleanedJson);
+  const parsed = JSON.parse(rawContent);
 
   return {
     sellToken: (parsed.sellToken || 'ETH').toUpperCase(),
