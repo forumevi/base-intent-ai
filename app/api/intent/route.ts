@@ -1,91 +1,65 @@
 import { NextResponse } from 'next/server';
-import { encodeFunctionData, parseUnits, getAddress } from 'viem';
+import { getAddress } from 'viem';
 
-const WETH = getAddress('0x4200000000000000000000000000000000000006');
-const CBETH = getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498');
-
-// Aerodrome V2 Router & DOĞRU Pool Factory
-const AERODROME_ROUTER = getAddress('0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43');
-const AERODROME_FACTORY = getAddress('0x420DD381b31a868D039F8354386965E9463264d7');
-
-const AERODROME_ROUTER_ABI = [
-  {
-    inputs: [
-      { name: 'amountOutMin', type: 'uint256' },
-      {
-        components: [
-          { name: 'from', type: 'address' },
-          { name: 'to', type: 'address' },
-          { name: 'stable', type: 'bool' },
-          { name: 'factory', type: 'address' }
-        ],
-        name: 'routes',
-        type: 'tuple[]'
-      },
-      { name: 'to', type: 'address' },
-      { name: 'deadline', type: 'uint256' }
-    ],
-    name: 'swapExactETHForTokens',
-    outputs: [{ name: 'amounts', type: 'uint256[]' }],
-    stateMutability: 'payable',
-    type: 'function'
-  }
-] as const;
+const WETH = '0x4200000000000000000000000000000000000006';
+const CBETH = '0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498';
+const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 export async function POST(req: Request) {
   try {
-    const { userAddress } = await req.json();
+    const { prompt, userAddress } = await req.json();
 
-    const amountInWei = parseUnits('0.0001', 18);
     const recipient = (userAddress && userAddress.startsWith('0x'))
       ? getAddress(userAddress)
-      : getAddress('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa');
+      : '0x95773c1f40b82dd8d0529471f6a6016fdfe990aa';
 
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
+    let buyToken = CBETH;
+    let buySymbol = "CBETH";
+    if (prompt?.toUpperCase().includes("USDC")) {
+      buyToken = USDC;
+      buySymbol = "USDC";
+    }
 
-    // KESİN PARAMETRELER: WETH -> cbETH | stable: true | DOĞRU FACTORY
-    const routes = [
+    const amountInWei = "100000000000000"; // 0.0001 ETH (Wei)
+
+    // 0x Aggregator V2 Swap API Çağrısı (Base Mainnet)
+    const response = await fetch(
+      `https://base.api.0x.org/swap/v1/quote?buyToken=${buyToken}&sellToken=${WETH}&sellAmount=${amountInWei}&takerAddress=${recipient}`,
       {
-        from: WETH,
-        to: CBETH,
-        stable: true,
-        factory: AERODROME_FACTORY
+        headers: {
+          '0x-api-key': '00000000-0000-0000-0000-000000000000' // Public rate limit
+        }
       }
-    ];
+    );
 
-    const swapCalldata = encodeFunctionData({
-      abi: AERODROME_ROUTER_ABI,
-      functionName: 'swapExactETHForTokens',
-      args: [
-        BigInt(0),
-        routes,
-        recipient,
-        deadline
-      ]
-    });
+    const quote = await response.json();
+
+    if (!quote || quote.reason || !quote.to) {
+      throw new Error(quote.reason || "0x Quote alınamadı.");
+    }
 
     return NextResponse.json({
       success: true,
       data: {
-        to: AERODROME_ROUTER,
-        data: swapCalldata,
-        value: `0x${amountInWei.toString(16)}`,
+        to: quote.to,
+        data: quote.data,
+        value: quote.value || `0x${BigInt(amountInWei).toString(16)}`,
         sellToken: 'ETH',
-        buyToken: 'CBETH',
+        buyToken: buySymbol,
         amount: '0.0001',
         executionBatch: [
           {
             step: 1,
-            action: 'Swap 0.0001 ETH for cbETH on Aerodrome',
-            targetContract: AERODROME_ROUTER,
-            estimatedGasUsd: '$0.01',
-            details: { calldata: swapCalldata }
+            action: `Swap 0.0001 ETH for ${buySymbol} via 0x Aggregator`,
+            targetContract: quote.to,
+            estimatedGasUsd: "$0.01",
+            details: { calldata: quote.data }
           }
         ]
       }
     });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Route Failed" }, { status: 500 });
   }
 }
