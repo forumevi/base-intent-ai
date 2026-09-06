@@ -5,6 +5,25 @@ import { useState } from 'react';
 export default function Home() {
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
+  const [userAddress, setUserAddress] = useState<string | null>(null);
+
+  // Example wallet connect trigger
+  const handleConnectWallet = async () => {
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      try {
+        const accounts = await (window as any).ethereum.request({ 
+          method: 'eth_requestAccounts' 
+        });
+        if (accounts && accounts[0]) {
+          setUserAddress(accounts[0]);
+        }
+      } catch (err) {
+        console.error('Wallet connection failed:', err);
+      }
+    } else {
+      alert('Please install a Web3 wallet like MetaMask or Rabby.');
+    }
+  };
 
   const handleRunAgent = async (currentPrompt?: string) => {
     const textToUse = currentPrompt || prompt;
@@ -12,11 +31,10 @@ export default function Home() {
     setLoading(true);
 
     try {
-      // API Çağrısı veya Agent Tetikleme Mantığı
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: textToUse })
+        body: JSON.stringify({ prompt: textToUse, userAddress })
       });
       const data = await res.json();
       console.log('Agent Response:', data);
@@ -48,7 +66,7 @@ export default function Home() {
           </div>
         </div>
 
-        {/* HEADER & BRANDING */}
+        {/* HEADER & WALLET CONNECTION */}
         <header className="flex items-center justify-between py-2 border-b border-slate-800/60 pb-5">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-xl flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/20">
@@ -65,11 +83,19 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-medium">
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-medium">
               <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-              BASE MAINNET ACTIVE
+              BASE MAINNET
             </span>
+
+            <button
+              type="button"
+              onClick={handleConnectWallet}
+              className="bg-blue-600 hover:bg-blue-500 text-white font-mono text-xs font-bold px-4 py-2 rounded-xl transition-all shadow-md shadow-blue-600/20 border border-blue-400/30 flex items-center gap-2 cursor-pointer"
+            >
+              🔒 {userAddress ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}` : 'Connect Wallet'}
+            </button>
           </div>
         </header>
 
@@ -97,7 +123,7 @@ export default function Home() {
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Type any natural language prompt... e.g. 'Swap 0.0001 ETH for USDC' or '1 USDC al ETH ile'"
+              placeholder="Type any natural language prompt... e.g. 'Swap 0.0001 ETH for USDC'"
               className="w-full bg-[#030611] border border-slate-800 focus:border-blue-500/80 rounded-xl p-4 text-sm font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 resize-none transition-all h-28"
             />
             
@@ -140,11 +166,11 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => { const p = '1 USDC al ETH ile'; setPrompt(p); handleRunAgent(p); }}
+                onClick={() => { const p = 'Swap 0.0001 ETH for cbETH'; setPrompt(p); handleRunAgent(p); }}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-emerald-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span>🔄 1 USDC al <strong className="text-white">ETH ile</strong></span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">Base Intent Engine</span>
+                <span>🔄 0.0001 ETH ➔ <strong className="text-white">cbETH</strong></span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">Coinbase V3</span>
               </button>
 
               <button
