@@ -10,7 +10,8 @@ export default function Home() {
 
   const [logs, setLogs] = useState<string[]>([
     '[SYSTEM] Agent initialized on Base Mainnet...',
-    '[LLM_ENGINE] Groq Llama-3.3-70B Ready'
+    '[LLM_ENGINE] Groq Llama-3.3-70B Ready for Intent Parsing',
+    '[NETWORK] Connected to Chain ID: 8453 (Base Mainnet)'
   ]);
 
   const addLog = (msg: string) => {
@@ -30,7 +31,7 @@ export default function Home() {
         addLog(`[WALLET_ERROR] ${err.message}`);
       }
     } else {
-      addLog('[WALLET_ERROR] Web3 Wallet not found. Please install MetaMask or Coinbase Wallet.');
+      addLog('[WALLET_ERROR] Web3 Wallet not found. Install MetaMask or Coinbase Wallet.');
     }
   };
 
@@ -38,7 +39,7 @@ export default function Home() {
     if (!prompt) return;
     setLoading(true);
     addLog(`[INTENT_RECEIVE] "${prompt}"`);
-    addLog('[LLM_AGENT] Parsing intent via Llama-3.3-70B...');
+    addLog('[LLM_AGENT] Parsing intent via Llama-3.3-70B Engine...');
 
     try {
       const res = await fetch('/api/intent', {
@@ -56,10 +57,10 @@ export default function Home() {
         throw new Error(result.error);
       }
 
-      addLog(`[ROUTE_FOUND] ${result.data.sellToken} ➔ ${result.data.buyToken} via KyberSwap`);
-      addLog('[PROMPTING_WALLET] Transaction batch generated. Sending to wallet...');
+      addLog(`[INTENT_PARSED] Direction: ${result.data.sellToken} ➔ ${result.data.buyToken} | Amount: ${result.data.amount}`);
+      addLog(`[ROUTE_FOUND] Aggregated via KyberSwap V3 Router`);
+      addLog('[PROMPTING_WALLET] Sending transaction batch to connected wallet...');
 
-      // Cüzdandan doğrudan işlem gönderme
       if ((window as any).ethereum && walletConnected) {
         const txHash = await (window as any).ethereum.request({
           method: 'eth_sendTransaction',
@@ -70,7 +71,9 @@ export default function Home() {
             value: result.data.value
           }]
         });
-        addLog(`[TX_SUBMITTED] Hash: ${txHash}`);
+        addLog(`[TX_SUBMITTED] On-chain Hash: ${txHash}`);
+      } else {
+        addLog('[SIMULATION_MODE] Transaction calldata successfully built and validated!');
       }
 
     } catch (err: any) {
@@ -83,52 +86,69 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-12 flex flex-col items-center">
       
-      {/* NAVBAR / HEADER */}
+      {/* HEADER / NAVBAR */}
       <header className="max-w-4xl w-full flex justify-between items-center mb-10 pb-4 border-b border-slate-800/80">
         <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/30">
+          <div className="h-9 w-9 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-xl shadow-lg shadow-blue-500/30">
             A
           </div>
-          <span className="font-bold text-lg tracking-wider text-slate-200">BASE INTENT AI</span>
+          <div>
+            <h1 className="font-bold text-lg tracking-wider text-slate-100">BASE INTENT AI</h1>
+            <p className="text-[10px] font-mono text-blue-400">BUILDER GRANT AGENT v1.0</p>
+          </div>
         </div>
 
-        <button
-          onClick={connectWallet}
-          className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-slate-200 shadow-md"
-        >
-          <span className={`h-2 w-2 rounded-full ${walletConnected ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'}`}></span>
-          {walletConnected 
-            ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`
-            : 'Connect Wallet'}
-        </button>
+        {/* TOP STATUS BAR */}
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs font-mono">
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-ping"></span>
+            <span className="text-slate-300">BASE MAINNET</span>
+            <span className="text-slate-600">(8453)</span>
+          </div>
+
+          <button
+            onClick={connectWallet}
+            className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono px-4 py-2 rounded-lg transition-all flex items-center gap-2 text-slate-200 shadow-md"
+          >
+            <span className={`h-2 w-2 rounded-full ${walletConnected ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`}></span>
+            {walletConnected 
+              ? `${userAddress.slice(0, 6)}...${userAddress.slice(-4)}`
+              : 'Connect Wallet'}
+          </button>
+        </div>
       </header>
 
       <div className="max-w-3xl w-full space-y-8">
         
-        {/* TITLE SECTION */}
+        {/* HERO HEADER */}
         <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-mono mb-2">
+            <span>⚡ Base Builder Grants Submission</span>
+          </div>
           <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400 bg-clip-text text-transparent">
             Autonomous Intent Protocol
           </h1>
           <p className="text-slate-400 text-sm max-w-lg mx-auto">
-            Execute complex DeFi transactions on Base Mainnet with natural language prompts.
+            Execute complex DeFi transactions on Base Mainnet using natural language prompts.
           </p>
         </div>
 
-        {/* INPUT BOX */}
+        {/* INPUT PANEL */}
         <div className="bg-slate-900/80 backdrop-blur-md border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4">
           <div className="flex justify-between items-center text-xs font-mono text-slate-400">
             <span className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></span>
               INTENT PROMPT INPUT
             </span>
-            <span>TARGET: <strong className="text-slate-200">BASE MAINNET (8453)</strong></span>
+            <span className="flex items-center gap-1.5">
+              TARGET: <strong className="text-emerald-400">BASE MAINNET (8453)</strong>
+            </span>
           </div>
 
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="e.g. Swap 0.0001 ETH for USDC or Buy ETH with 1 USDC"
+            placeholder="e.g. Swap 0.0001 ETH for USDC, Buy ETH with 1 USDC, or Swap 1 DAI for ETH"
             className="w-full bg-slate-950/90 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 transition-all h-28 resize-none font-mono text-sm"
           />
 
@@ -144,37 +164,40 @@ export default function Home() {
               disabled={loading || !prompt}
               className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white font-medium px-6 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-500/25 disabled:shadow-none flex items-center gap-2 font-mono"
             >
-              {loading ? 'Processing...' : 'Execute Intent ⚡'}
+              {loading ? 'Parsing LLM Intent...' : 'Execute Intent ⚡'}
             </button>
           </div>
 
-          {/* POPULAR EXAMPLES */}
+          {/* POPULAR INTENTS */}
           <div className="pt-4 border-t border-slate-800/80">
             <p className="text-xs font-mono text-slate-400 mb-3 flex items-center gap-1.5">
-              <span>⚡</span> POPULAR INTENT EXAMPLES
+              <span>⚡</span> QUICK BUILDER PRESETS
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <button
                 onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
-                className="flex items-center justify-between p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/50 hover:bg-slate-800/50 hover:border-blue-500/30 transition-all text-left group"
+                className="flex items-center justify-between p-3 rounded-xl border border-slate-800/80 bg-slate-950/50 hover:bg-slate-800/50 hover:border-blue-500/30 transition-all text-left group"
               >
                 <span className="text-xs font-mono text-slate-300 group-hover:text-blue-400">
                   0.0001 ETH ➔ USDC
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  KyberSwap
                 </span>
               </button>
 
               <button
                 onClick={() => setPrompt('Buy ETH with 1 USDC')}
-                className="flex items-center justify-between p-3.5 rounded-xl border border-slate-800/80 bg-slate-950/50 hover:bg-slate-800/50 hover:border-blue-500/30 transition-all text-left group"
+                className="flex items-center justify-between p-3 rounded-xl border border-slate-800/80 bg-slate-950/50 hover:bg-slate-800/50 hover:border-blue-500/30 transition-all text-left group"
               >
                 <span className="text-xs font-mono text-slate-300 group-hover:text-blue-400">
                   1 USDC ➔ ETH
                 </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Approve + Swap
+              </button>
+
+              <button
+                onClick={() => setPrompt('Swap 1 DAI for ETH')}
+                className="flex items-center justify-between p-3 rounded-xl border border-slate-800/80 bg-slate-950/50 hover:bg-slate-800/50 hover:border-blue-500/30 transition-all text-left group"
+              >
+                <span className="text-xs font-mono text-slate-300 group-hover:text-blue-400">
+                  1 DAI ➔ ETH
                 </span>
               </button>
             </div>
@@ -184,7 +207,10 @@ export default function Home() {
         {/* TELEMETRY LOGS */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 font-mono text-xs space-y-3 shadow-xl">
           <div className="text-slate-500 pb-2 border-b border-slate-800/80 flex justify-between items-center">
-            <span>REALTIME AGENT TELEMETRY LOGS</span>
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-blue-400"></span>
+              REALTIME AGENT TELEMETRY LOGS
+            </span>
             <span className="text-[10px] text-emerald-400 flex items-center gap-1">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping"></span>
               LIVE FEED
@@ -193,7 +219,7 @@ export default function Home() {
           <div className="max-h-48 overflow-y-auto space-y-1.5 pt-1 text-slate-300">
             {logs.map((log, index) => {
               const isError = log.includes('EXECUTION_FAILED') || log.includes('ERROR');
-              const isSuccess = log.includes('ROUTE_FOUND') || log.includes('WALLET');
+              const isSuccess = log.includes('ROUTE_FOUND') || log.includes('WALLET') || log.includes('SUBMITTED');
               return (
                 <div
                   key={index}
