@@ -40,18 +40,14 @@ export default function Home() {
     }
   }, [isConnected, isMainnet]);
 
-  // Kesin Bağlantı Tetikleyici
-  const handleConnect = async () => {
-    try {
-      if (connectors && connectors.length > 0) {
-        // En uygun konnektörü seç veya doğrudan ilkini bağla
-        const activeConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
-        connect({ connector: activeConnector });
-      } else {
-        alert('Cüzdan eklentisi (MetaMask/Rabby) taptatlı bir şekilde algılanamadı. Lütfen eklentinizin aktif olduğundan emin olun.');
-      }
-    } catch (err: any) {
-      console.error('Wallet connection error:', err);
+  // Tekil Güvenli Bağlantı Tetikleyici
+  const handleConnect = () => {
+    // Tarayıcıdaki varsayılan/aktif EVM cüzdanını (MetaMask/Rabby/Coinbase) tetikle
+    const injectedConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMaskSDK' || c.id === 'io.metamask') || connectors[0];
+    if (injectedConnector) {
+      connect({ connector: injectedConnector });
+    } else {
+      alert('EVM Uyumlu Cüzdan (MetaMask/Rabby) Bulunamadı!');
     }
   };
 
@@ -208,18 +204,13 @@ export default function Home() {
               {address?.slice(0, 6)}...{address?.slice(-4)}
             </button>
           ) : (
-            <div className="flex items-center gap-1">
-              {connectors.map((connector) => (
-                <button
-                  key={connector.id}
-                  type="button"
-                  onClick={() => connect({ connector })}
-                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer"
-                >
-                  Connect {connector.name.replace('Injected', 'Wallet')} 🔒
-                </button>
-              ))}
-            </div>
+            <button
+              type="button"
+              onClick={handleConnect}
+              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer flex items-center gap-2"
+            >
+              Connect Wallet 🔒
+            </button>
           )}
         </div>
       </header>
