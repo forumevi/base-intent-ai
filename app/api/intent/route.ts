@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getAddress } from 'viem';
 
-// Base Mainnet Token Adresleri
-const WETH = getAddress('0x4200000000000000000000000000000000000006');
+// Base Mainnet Adresleri
+const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'; // Native ETH için standart adres
 const CBETH = getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498');
 const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 
@@ -15,47 +15,65 @@ export async function POST(req: Request) {
       : getAddress('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa');
 
     let buyToken = CBETH;
-    let buySymbol = "CBETH";
+    let buySymbol = 'CBETH';
 
-    if (prompt?.toUpperCase().includes("USDC")) {
+    if (prompt?.toUpperCase().includes('USDC')) {
       buyToken = USDC;
-      buySymbol = "USDC";
+      buySymbol = 'USDC';
     }
 
-    const amountInWei = "100000000000000"; // 0.0001 ETH (Wei)
+    const amountInWei = '100000000000000'; // 0.0001 ETH (18 decimals)
 
-    // 0x Open API / Aggregator Endpoint (Base Mainnet)
-    // Dynamic routing: 0x kontratı ETH'yi otomatik Wrap edip doğru likidite havuzuna yönlendirir.
-    const url = `https://base.api.0x.org/swap/v1/quote?sellToken=${WETH}&buyToken=${buyToken}&sellAmount=${amountInWei}&takerAddress=${recipient}&slippagePercentage=0.01`;
+    // 1. KyberSwap Router API - Rota Sorgusu
+    const routeUrl = `https://aggregator-api.kyberswap.com/base/api/v1/routes?tokenIn=${NATIVE_ETH}&tokenOut=${buyToken}&amountIn=${amountInWei}`;
+    
+    const routeRes = await fetch(routeUrl, {
+      headers: { 'x-client-id': 'BaseIntentAI' }
+    });
+    const routeData = await routeRes.json();
 
-    const response = await fetch(url, {
-      headers: {
-        '0x-api-key': process.env.ZEROX_API_KEY || '00000000-0000-0000-0000-000000000000', // API Key veya varsayılan public rate limit
+    if (!routeData?.data?.routeSummary) {
+      throw new Error("KyberSwap üzerinde uygun likidite rotası bulunamadı.");
+    }
+
+    // 2. KyberSwap Calldata Oluşturma (Build)
+    const buildUrl = `https://aggregator-api.kyberswap.com/base/api/v1/route/build`;
+    const buildRes = await fetch(buildUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-client-id': 'BaseIntentAI'
       },
+      body: JSON.stringify({
+        routeSummary: routeData.data.routeSummary,
+        sender: recipient,
+        recipient: recipient,
+        slippageTolerance: 50 // %0.5 Slippage
+      })
     });
 
-    const data = await response.json();
+    const buildData = await buildRes.json();
 
-    if (!response.ok || !data.to || !data.data) {
-      throw new Error(data.reason || data.message || "0x Aggregator'dan geçerli rota alınamadı.");
+    if (!buildData?.data?.data) {
+      throw new Error("KyberSwap Calldata üretilemedi.");
     }
 
     return NextResponse.json({
       success: true,
       data: {
-        to: getAddress(data.to),
-        data: data.data,
-        value: data.value ? `0x${BigInt(data.value).toString(16)}` : `0x${BigInt(amountInWei).toString(16)}`,
+        to: getAddress(buildData.data.routerAddress),
+        data: buildData.data.data,
+        value: `0x${BigInt(amountInWei).toString(16)}`,
         sellToken: 'ETH',
         buyToken: buySymbol,
         amount: '0.0001',
         executionBatch: [
           {
             step: 1,
-            action: `Swap 0.0001 ETH for ${buySymbol} via 0x Aggregator SDK`,
-            targetContract: data.to,
-            estimatedGasUsd: "$0.01",
-            details: { calldata: data.data }
+            action: `Swap 0.0001 ETH for ${buySymbol} via KyberSwap Aggregator`,
+            targetContract: buildData.data.routerAddress,
+            estimatedGasUsd: '$0.01',
+            details: { calldata: buildData.data.data }
           }
         ]
       }
@@ -64,7 +82,7 @@ export async function POST(req: Request) {
   } catch (error: any) {
     return NextResponse.json({ 
       success: false, 
-      error: error.message || "Routing hatası oluştu." 
+      error: error.message || 'Routing hatası oluştu.' 
     }, { status: 500 });
   }
 }
