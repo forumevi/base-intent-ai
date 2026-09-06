@@ -63,4 +63,148 @@ async function parseIntentWithLLM(prompt: string) {
         })
       });
       const data = await res.json();
-      const content = data.choices[0].message.content.trim().replace(/```json|
+      
+      // Temizlik işlemi string parçalama (replaceAll) ile yapılarak RegEx build hataları kesin engellenir
+      let rawContent = data.choices[0].message.content.trim();
+      rawContent = rawContent.replaceAll('```json', '').replaceAll('```', '').trim();
+      
+      const parsed = JSON.parse(rawContent);
+      return {
+        sellToken: parsed.sellToken.toUpperCase(),
+        buyToken: parsed.buyToken.toUpperCase(),
+        amount: String(parsed.amount)
+      };
+    } catch (e) {
+      console.warn('Groq API fallback triggered:', e);
+    }
+  }
+
+  // Fallback Deterministik Logic (LLM Yanıt Vermezse)
+  const p = prompt.toLowerCase().trim();
+  let sellToken = 'ETH';
+  let buyToken = 'USDC';
+  let amount = '0.0001';
+
+  const numbers = p.match(/\d+(\.\d+)?/g);
+  if (numbers && numbers.length > 0) amount = numbers[0];
+
+  if (p.includes('dai')) {
+    if (p.startsWith('swap') && p.includes('dai') && (p.includes('for eth') || p.includes('to eth'))) {
+      sellToken = 'DAI';
+      buyToken = 'ETH';
+    } else if (p.includes('buy dai')) {
+      sellToken = 'ETH';
+      buyToken = 'DAI';
+    } else {
+      sellToken = 'DAI';
+      buyToken = 'ETH';
+    }
+  } else if (p.includes('usdc')) {
+    if (p.includes('buy eth with usdc') || p.includes('usdc for eth') || p.includes('usdc to eth')) {
+      sellToken = 'USDC';
+      buyToken = 'ETH';
+    } else {
+      sellToken = 'ETH';
+      buyToken = 'USDC';
+    }
+  }
+
+  return { sellToken, buyToken, amount };
+}
+
+export async function POST(req: Request) {
+  try {
+    const { prompt, userAddress } = await req.json();
+
+    const recipient = userAddress && userAddress.startsWith('0x')
+      ? toChecksum(userAddress)
+      : toChecksum('0x95773c1f40b82dd8d0529471f6a6016fdfe990aa');
+
+    // Niyet Yapay Zeka Tarafından Ayrıştırılır
+    const parsed = await parseIntentWithLLM(prompt);
+
+    const tokenInObj = TOKENS[parsed.sellToken] || TOKENS.ETH;
+    const tokenOutObj = TOKENS[parsed.buyToken] || TOKENS.USDC;
+
+    const tokenIn = toChecksum(tokenInObj.address);
+    const tokenOut = toChecksum(tokenOutObj.address);
+
+    const amountInWei = parseUnits(parsed.amount, tokenInObj.decimals).toString();
+
+    // KyberSwap Rota Sorgusu
+    const routeUrl = `https://aggregator-api.kyberswap.com/base/api/v1/routes?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountInWei}`;
+    const routeRes = await fetch(routeUrl, { headers: { 'x-client-id': 'BaseIntentAI' } });
+    const routeData = await routeRes.json();
+
+    const routeSummary = routeData?.data?.routeSummary;
+    if (!routeSummary) {
+      throw new Error(`${parsed.sellToken} ➔ ${parsed.buyToken} için KyberSwap üzerinde likidite rotası bulunamadı.`);
+    }
+
+    const rawRouter = routeSummary.routerAddress || routeData?.data?.routerAddress || DEFAULT_KYBER_ROUTER;
+    const routerAddress = toChecksum(rawRouter);
+
+    // Calldata Build
+    const buildRes = await fetch(`https://aggregator-api.kyberswap.com/base/api/v1/route/build`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-client-id': 'BaseIntentAI' },
+      body: JSON.stringify({
+        routeSummary: routeSummary,
+        sender: recipient,
+        recipient: recipient,
+        slippageTolerance: 100
+      })
+    });
+    const buildData = await buildRes.json();
+
+    if (!buildData?.data?.data) {
+      throw new Error('Calldata üretilemedi.');
+    }
+
+    const swapCalldata = buildData.data.data;
+    const executionBatch = [];
+    const isNativeIn = parsed.sellToken === 'ETH';
+
+    // ERC20 Satılıyorsa (DAI, USDC vs.) Approve İşlemi Ekle
+    if (!isNativeIn) {
+      const approveData = encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [routerAddress, BigInt(amountInWei)]
+      });
+
+      executionBatch.push({
+        step: 1,
+        action: `Approve ${parsed.amount} ${parsed.sellToken} for KyberSwap Router`,
+        targetContract: tokenIn,
+        details: { calldata: approveData }
+      });
+    }
+
+    executionBatch.push({
+      step: isNativeIn ? 1 : 2,
+      action: `Swap ${parsed.amount} ${parsed.sellToken} for ${parsed.buyToken}`,
+      targetContract: routerAddress,
+      details: { calldata: swapCalldata }
+    });
+
+    // KESİN GÜVENLİK KONTROLÜ: Satılan token ETH değilse value HER ZAMAN 0x0 olmalıdır!
+    const txValue = isNativeIn ? `0x${BigInt(amountInWei).toString(16)}` : '0x0';
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        to: isNativeIn ? routerAddress : tokenIn,
+        data: executionBatch[0].details.calldata,
+        value: txValue,
+        sellToken: parsed.sellToken,
+        buyToken: parsed.buyToken,
+        amount: parsed.amount,
+        executionBatch: executionBatch
+      }
+    });
+
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message || 'Route Failed' }, { status: 500 });
+  }
+}
