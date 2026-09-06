@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
-import { encodeFunctionData, parseUnits, getAddress } from 'viem';
+import { encodeFunctionData, parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
+import { base } from 'viem/chains';
 
+// 1. Base Mainnet RPC Client (On-chain Bakiye ve Kontrat Okumaları İçin)
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http('https://mainnet.base.org')
+});
+
+// 2. Desteklenen Tokenlar ve Kontrat Adresleri
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
   ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
   WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
@@ -9,6 +17,16 @@ const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> 
   DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), decimals: 18 },
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
+
+// 3. Token Çiftine Özel Doğru Uniswap V3 Fee Tespiti (Simülasyon Hatalarını Önler)
+function getOptimalFeeTier(sellToken: string, buyToken: string): number {
+  const pair = `${sellToken}-${buyToken}`;
+  
+  if (pair.includes('AERO')) return 3000;    // AERO havuzları genelde %0.30
+  if (pair.includes('CBETH')) return 500;    // cbETH/ETH havuzları %0.05
+  if (pair.includes('DAI')) return 100;      // Stablecoin / DAI havuzları %0.01 veya %0.05
+  return 500;                                // Standart %0.05 (USDC/ETH vb.)
+}
 
 const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
 
@@ -36,6 +54,69 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
+const ERC20_ABI = [
+  {
+    inputs: [{ name: 'owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function'
+  }
+] as const;
+
+// 4. Groq API - Yedekli (Fallback) LLM Çağrısı
+async function fetchLLMWithFallback(apiKey: string, prompt: string) {
+  const models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
+  const systemPrompt = `
+    You are BaseIntent AI, an autonomous Web3 Intent Engine for Base Network (Chain ID: 8453).
+    Analyze the user prompt and extract intent parameters.
+
+    If user prompt asks to buy/swap with "all", "everything", "cüzdandaki tüm", or no specific amount is given, set "isAll": true and "amount": "ALL".
+
+    Respond STRICTLY in JSON format without markdown blocks:
+    {
+      "sellToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
+      "buyToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
+      "amount": "0.0001" or "ALL",
+      "isAll": boolean,
+      "intentType": "SWAP",
+      "confidenceScore": 0.98,
+      "riskAnalysis": { "score": "LOW", "warnings": [] },
+      "simulationSummary": "Summary of intent for Base Network."
+    }
+  `;
+
+  for (const model of models) {
+    try {
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.choices && data.choices[0]?.message?.content) {
+        return JSON.parse(data.choices[0].message.content);
+      }
+    } catch (err) {
+      console.warn(`Model ${model} failed, trying next fallback...`);
+    }
+  }
+
+  throw new Error("Tüm LLM modelleri yanıt vermede başarısız oldu.");
+}
+
 export async function POST(req: Request) {
   try {
     const { prompt, userAddress } = await req.json();
@@ -48,75 +129,65 @@ export async function POST(req: Request) {
       }, { status: 500 });
     }
 
-    const systemPrompt = `
-      You are BaseIntent AI, an autonomous Web3 Intent Engine for Base Network (Chain ID: 8453).
-      Analyze the user prompt and extract structured Web3 intent details.
-      
-      Respond STRICTLY in JSON format. Structure:
-      {
-        "sellToken": "ETH",
-        "buyToken": "USDC",
-        "amount": "0.0001",
-        "intentType": "SWAP",
-        "confidenceScore": 0.98,
-        "riskAnalysis": {
-          "score": "LOW",
-          "warnings": []
-        },
-        "simulationSummary": "Clear summary of parsed intent for Base Network."
-      }
-    `;
+    // 1. LLM ile Niyeti Ayrıştır
+    const parsedIntent = await fetchLLMWithFallback(apiKey, prompt);
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "openai/gpt-oss-120b",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.1,
-        response_format: { type: "json_object" }
-      })
-    });
-
-    const aiData = await response.json();
-
-    if (!response.ok || !aiData.choices || !aiData.choices[0]) {
-      const errorMsg = aiData.error?.message || JSON.stringify(aiData);
-      return NextResponse.json({ 
-        success: false, 
-        error: `Groq Yanit Hatasi: ${errorMsg}` 
-      }, { status: 500 });
-    }
-
-    const parsedIntent = JSON.parse(aiData.choices[0].message.content);
-
-    // Token & Swap verilerini çözümleme (Yeni Geliştirmeler)
     const sellToken = (parsedIntent.sellToken || 'ETH').toUpperCase();
     const buyToken = (parsedIntent.buyToken || 'USDC').toUpperCase();
-    const amountStr = String(parsedIntent.amount || '0.0001');
-
+    
     const sellObj = BASE_TOKENS[sellToken] || BASE_TOKENS.ETH;
     const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.USDC;
 
-    const amountInWei = parseUnits(amountStr, sellObj.decimals);
+    // 2. On-Chain Gerçek Bakiye Kontrolü ("Tüm bakiyem ile al" durumları için)
+    let amountInWei: bigint;
+    let finalAmountStr = String(parsedIntent.amount || '0.0001');
+
+    if (parsedIntent.isAll || parsedIntent.amount === 'ALL') {
+      if (userAddress && userAddress.startsWith('0x')) {
+        if (sellToken === 'ETH') {
+          const balance = await publicClient.getBalance({ address: getAddress(userAddress) });
+          // Gas ücreti (yaklaşık 0.0005 ETH) düşülüyor
+          amountInWei = balance > parseUnits('0.0005', 18) ? balance - parseUnits('0.0005', 18) : BigInt(0);
+        } else {
+          const balance = await publicClient.readContract({
+            address: sellObj.address,
+            abi: ERC20_ABI,
+            functionName: 'balanceOf',
+            args: [getAddress(userAddress)]
+          }) as bigint;
+          amountInWei = balance;
+        }
+        finalAmountStr = formatUnits(amountInWei, sellObj.decimals);
+      } else {
+        amountInWei = parseUnits('0.0001', sellObj.decimals);
+        finalAmountStr = '0.0001';
+      }
+    } else {
+      amountInWei = parseUnits(finalAmountStr, sellObj.decimals);
+    }
+
+    if (amountInWei <= BigInt(0)) {
+      return NextResponse.json({ 
+        success: false, 
+        error: `Cüzdanınızda yeterli ${sellToken} bakiyesi bulunamadı.` 
+      }, { status: 400 });
+    }
+
+    // 3. Doğru Havuz Fee Seçimi
+    const feeTier = getOptimalFeeTier(sellToken, buyToken);
 
     const recipientAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
       : UNISWAP_ROUTER;
 
+    // 4. Swap Calldata Üretimi
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
         tokenIn: sellObj.address,
         tokenOut: buyObj.address,
-        fee: 500,
+        fee: feeTier,
         recipient: recipientAddress,
         amountIn: amountInWei,
         amountOutMinimum: BigInt(0),
@@ -124,32 +195,8 @@ export async function POST(req: Request) {
       }]
     });
 
-    // Hem UI hem de Swap kontratı için gereken tüm çıktılar harmanlandı
-    return NextResponse.json({ 
-      success: true, 
+    // 5. UI ve Cüzdan İçin Tam Veri Paketleme
+    return NextResponse.json({
+      success: true,
       data: {
         ...parsedIntent,
-        to: UNISWAP_ROUTER,
-        data: swapCalldata,
-        value: sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0',
-        sellToken,
-        buyToken,
-        amount: amountStr,
-        sellTokenAddress: sellObj.address,
-        amountInWei: amountInWei.toString(),
-        executionBatch: [
-          {
-            step: 1,
-            action: `Swap ${amountStr} ${sellToken} for ${buyToken}`,
-            targetContract: UNISWAP_ROUTER,
-            estimatedGasUsd: "$0.01",
-            details: { calldata: swapCalldata }
-          }
-        ]
-      } 
-    });
-
-  } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Bilinmeyen bir hata oluştu." }, { status: 500 });
-  }
-}
