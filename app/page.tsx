@@ -1,408 +1,192 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAccount, useConnect, useDisconnect, useSendTransaction, useSwitchChain, useChainId } from 'wagmi';
-import { base, baseSepolia } from 'wagmi/chains';
+import { useState } from 'react';
 
 export default function Home() {
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { switchChain } = useSwitchChain();
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { sendTransactionAsync } = useSendTransaction();
-
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
-  const [lastTxHash, setLastTxHash] = useState<string | null>(null);
-  const [mounted, setMounted] = useState(false);
-  const [showMainnetWarning, setShowMainnetWarning] = useState(false);
 
-  const isMainnet = chainId === base.id;
-  const isSepolia = chainId === baseSepolia.id;
-
-  const [agentLogs, setAgentLogs] = useState<string[]>([
-    'AGENT_CORE_INIT: Base L2 Execution Layer Active',
-    'AI_INTENT_PARSER: Llama-3.3-70B Neural Engine Online',
-    'SAFETY_GUARD: Direct Route Protection Active',
-    'AWAITING_INPUT: Select preset or input plain English prompt...'
-  ]);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (isConnected && isMainnet) {
-      setShowMainnetWarning(true);
-    } else {
-      setShowMainnetWarning(false);
-    }
-  }, [isConnected, isMainnet]);
-
-  // Tekil Güvenli Bağlantı Tetikleyici
-  const handleConnect = () => {
-    // Tarayıcıdaki varsayılan/aktif EVM cüzdanını (MetaMask/Rabby/Coinbase) tetikle
-    const injectedConnector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMaskSDK' || c.id === 'io.metamask') || connectors[0];
-    if (injectedConnector) {
-      connect({ connector: injectedConnector });
-    } else {
-      alert('EVM Uyumlu Cüzdan (MetaMask/Rabby) Bulunamadı!');
-    }
-  };
-
-  const handleRunAgent = async (selectedPrompt?: string) => {
-    const activePrompt = selectedPrompt || prompt;
-    if (!activePrompt) return;
-
-    if (!isConnected) {
-      handleConnect();
-      return;
-    }
-
+  const handleRunAgent = async (currentPrompt?: string) => {
+    const textToUse = currentPrompt || prompt;
+    if (!textToUse) return;
     setLoading(true);
-    setLastTxHash(null);
-
-    setAgentLogs((prev) => [
-      `[${new Date().toLocaleTimeString()}] INTENT_RECEIVE: "${activePrompt}"`,
-      `[${new Date().toLocaleTimeString()}] PARSING: Evaluating Base V3 Liquidity Routes...`,
-      ...prev
-    ]);
 
     try {
+      // API Çağrısı veya Agent Tetikleme Mantığı
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: activePrompt, userAddress: address })
+        body: JSON.stringify({ prompt: textToUse })
       });
-
-      const resData = await res.json();
-
-      if (!res.ok || !resData.success) {
-        throw new Error(resData.error || 'Intent parsing failed');
-      }
-
-      const txData = resData.data?.aggregatorQuote?.transaction;
-      if (!txData || !txData.to) {
-        throw new Error('Invalid calldata from Intent Engine');
-      }
-
-      setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] ROUTE_FOUND: ${resData.data.sellToken} ➔ ${resData.data.buyToken} (${resData.data.amount} ${resData.data.sellToken})`,
-        `[${new Date().toLocaleTimeString()}] PROMPTING_WALLET: Please approve in wallet...`,
-        ...prev
-      ]);
-
-      const txHash = await sendTransactionAsync({
-        to: txData.to as `0x${string}`,
-        data: txData.data as `0x${string}`,
-        value: BigInt(txData.value || '0')
-      });
-
-      setLastTxHash(txHash);
-      setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] EXECUTION_SUCCESS: Transaction Confirmed!`,
-        `[${new Date().toLocaleTimeString()}] HASH: ${txHash}`,
-        ...prev
-      ]);
-
-    } catch (err: any) {
-      setAgentLogs((prev) => [
-        `[${new Date().toLocaleTimeString()}] EXECUTION_REVERTED: ${err.message || 'User rejected or simulation failed'}`,
-        ...prev
-      ]);
+      const data = await res.json();
+      console.log('Agent Response:', data);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  if (!mounted) return null;
-
   return (
-    <main className="min-h-screen bg-[#02040a] text-slate-100 flex flex-col items-center p-3 md:p-6 font-mono relative selection:bg-blue-600 selection:text-white">
-      
-      {/* TOP LIVE METRICS DASHBOARD BAR */}
-      <div className="w-full max-w-4xl bg-slate-950/90 border border-slate-800/80 rounded-xl p-2.5 mb-6 flex flex-wrap items-center justify-between text-[11px] gap-3 text-slate-400 backdrop-blur-md">
-        <div className="flex items-center gap-4 overflow-x-auto">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-slate-200 font-bold">BASE ENGINE:</span>
-            <span className="text-emerald-400">ONLINE</span>
-          </div>
-          <div className="h-3 w-[1px] bg-slate-800" />
-          <div>
-            <span className="text-slate-500">GAS:</span> <span className="text-slate-200">~0.003 Gwei</span>
-          </div>
-          <div className="h-3 w-[1px] bg-slate-800" />
-          <div>
-            <span className="text-slate-500">ROUTER:</span> <span className="text-blue-400 font-bold">Uniswap V3</span>
-          </div>
-          <div className="h-3 w-[1px] bg-slate-800" />
-          <div>
-            <span className="text-slate-500">LLAMA:</span> <span className="text-indigo-400">3.3-70B Quantized</span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/30 text-blue-400 text-[10px] font-bold">
-            Base Builder Grant
-          </span>
-        </div>
-      </div>
-
-      {/* MAIN NAVIGATION HEADER */}
-      <header className="w-full max-w-4xl flex items-center justify-between py-3 px-5 rounded-2xl bg-slate-900/40 border border-slate-800/80 mb-6 backdrop-blur-xl">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400 font-black text-base shadow-inner">
-            🛡️
-          </div>
-          <div>
-            <div className="font-extrabold text-sm tracking-wide text-white flex items-center gap-2">
-              BASE INTENT AI
-              <span className="text-[9px] font-semibold px-2 py-0.5 rounded bg-blue-600/30 text-blue-300 border border-blue-400/30">
-                PROD AGENT
-              </span>
-            </div>
-            <p className="text-[10px] text-slate-400">Autonomous DeFi Execution Platform</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {isConnected && (
-            <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 text-xs">
-              <button
-                type="button"
-                onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-                className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
-                  isSepolia 
-                    ? 'bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Sepolia
-              </button>
-              <button
-                type="button"
-                onClick={() => switchChain?.({ chainId: base.id })}
-                className={`px-3 py-1 rounded-lg transition-all text-[11px] ${
-                  isMainnet 
-                    ? 'bg-blue-600 text-white font-bold shadow-md shadow-blue-600/30' 
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Mainnet
-              </button>
-            </div>
-          )}
-
-          {isConnected ? (
-            <button 
-              type="button"
-              onClick={() => disconnect()}
-              className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 font-mono px-3.5 py-1.5 rounded-xl border border-red-500/30 transition cursor-pointer"
-            >
-              {address?.slice(0, 6)}...{address?.slice(-4)}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={handleConnect}
-              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-blue-600/20 cursor-pointer flex items-center gap-2"
-            >
-              Connect Wallet 🔒
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* MAINNET WARNING MODAL */}
-      {showMainnetWarning && (
-        <div className="w-full max-w-4xl mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between backdrop-blur-md shadow-2xl animate-fade-in">
-          <div className="flex items-center gap-3">
-            <span className="text-xl">⚠️</span>
-            <div>
-              <div className="font-bold text-amber-400 text-sm">REAL MAINNET FUNDS ACTIVE</div>
-              <div className="text-[11px] text-amber-300/80">
-                You are on Base Mainnet (Chain ID 8453). Real ETH/Tokens will be spent. For safe testing, switch to Sepolia.
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-            className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-200 font-bold shrink-0 transition"
-          >
-            Switch to Sepolia Testnet ➔
-          </button>
-        </div>
-      )}
-
-      {/* MAIN WORKSPACE */}
-      <div className="max-w-4xl w-full space-y-6">
+    <div className="min-h-screen bg-[#040711] text-slate-100 font-sans p-4 md:p-8 selection:bg-blue-500/30">
+      <div className="max-w-5xl mx-auto space-y-6">
         
-        <div className="text-center space-y-2 py-4">
-          <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight">
-            Base Agentic <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-300 to-cyan-400">Intent Protocol</span>
-          </h1>
-          <p className="text-slate-400 text-xs md:text-sm max-w-md mx-auto">
-            Execute complex DeFi transactions with plain English sentences.
+        {/* TOP SYSTEM STATUS BAR */}
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2 bg-[#0a0f1d] border border-slate-800/80 rounded-xl text-xs font-mono text-slate-400 shadow-sm">
+          <div className="flex items-center gap-4 flex-wrap">
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-slate-200 font-semibold">BASE ENGINE: ONLINE</span>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span>ROUTER: <strong className="text-blue-400">Uniswap V3 / Aerodrome</strong></span>
+            <span className="text-slate-600">|</span>
+            <span>LLAMA: <strong className="text-slate-300">3.3-70B Quantized</strong></span>
+          </div>
+          <div className="bg-blue-600/10 text-blue-400 px-3 py-1 rounded-md border border-blue-500/20 font-bold text-[11px]">
+            Base Builder Grant Submission
+          </div>
+        </div>
+
+        {/* HEADER & BRANDING */}
+        <header className="flex items-center justify-between py-2 border-b border-slate-800/60 pb-5">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 bg-gradient-to-tr from-blue-600 to-indigo-500 rounded-xl flex items-center justify-center font-bold text-lg shadow-lg shadow-blue-500/20">
+              ⚡
+            </div>
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                BASE INTENT AI
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">
+                  PROD AGENT
+                </span>
+              </h1>
+              <p className="text-xs text-slate-400 font-mono">Autonomous DeFi Execution Platform</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono font-medium">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              BASE MAINNET ACTIVE
+            </span>
+          </div>
+        </header>
+
+        {/* HERO TITLE SECTION */}
+        <div className="text-center py-6 space-y-2">
+          <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-blue-400">
+            Autonomous Intent Protocol
+          </h2>
+          <p className="text-sm md:text-base text-slate-400 max-w-2xl mx-auto font-mono">
+            Execute complex DeFi transactions with natural language prompts.
           </p>
         </div>
 
-        {/* INPUT PROMPT CARD */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-2xl backdrop-blur-xl relative">
-          <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
+        {/* MAIN INTERACTION CARD */}
+        <div className="bg-[#080d1a] border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4 relative overflow-hidden">
+          <div className="flex justify-between items-center text-xs font-mono text-slate-400 border-b border-slate-800/60 pb-2">
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 bg-blue-500 rounded-full"></span>
               INTENT PROMPT INPUT
             </span>
-            <span>TARGET: <strong className="text-slate-200">{isSepolia ? 'BASE SEPOLIA' : 'BASE MAINNET'}</strong></span>
+            <span className="text-slate-500">TARGET: <strong className="text-slate-300">BASE MAINNET (CHAIN ID 8453)</strong></span>
           </div>
 
           <div className="relative">
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="e.g. Swap 0.0001 ETH for USDT..."
-              className="w-full h-32 bg-[#010308] border border-slate-800/80 rounded-2xl p-4 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-blue-500 font-mono resize-none transition-all"
+              placeholder="Type any natural language prompt... e.g. 'Swap 0.0001 ETH for USDC' or '1 USDC al ETH ile'"
+              className="w-full bg-[#030611] border border-slate-800 focus:border-blue-500/80 rounded-xl p-4 text-sm font-mono text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500/50 resize-none transition-all h-28"
             />
             
-            <button
-              type="button"
-              onClick={() => handleRunAgent()}
-              disabled={loading}
-              className="absolute bottom-4 right-4 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/20 disabled:opacity-40 transition-all font-mono cursor-pointer flex items-center gap-2"
-            >
-              {loading ? 'Processing Agent...' : 'Execute Intent ⚡'}
-            </button>
+            <div className="absolute right-3 bottom-3 flex items-center gap-2">
+              {prompt && (
+                <button 
+                  type="button"
+                  onClick={() => setPrompt('')}
+                  className="text-xs text-slate-500 hover:text-slate-300 px-2 py-1 font-mono cursor-pointer"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleRunAgent()}
+                disabled={loading || !prompt}
+                className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-mono text-xs font-bold px-5 py-2.5 rounded-lg transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer"
+              >
+                {loading ? 'Processing Agent...' : 'Execute Intent ⚡'}
+              </button>
+            </div>
           </div>
 
-          {/* SAFE PRESET BUTTONS */}
+          {/* POPULAR INTENT EXAMPLES */}
           <div className="space-y-2 pt-2">
-            <div className="text-[11px] text-slate-400 font-bold tracking-wider">
+            <div className="text-[11px] text-slate-400 font-bold font-mono tracking-wider">
               ⚡ POPULAR INTENT EXAMPLES (CLICK TO EXECUTE)
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
               <button
                 type="button"
-                onClick={() => { 
-                  const p = 'Swap 0.0001 ETH for USDC';
-                  setPrompt(p); 
-                  handleRunAgent(p); 
-                }}
-                className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-blue-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
+                onClick={() => { const p = 'Swap 0.0001 ETH for USDC'; setPrompt(p); handleRunAgent(p); }}
+                className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-blue-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-blue-400 font-bold">🔄</span>
-                  <span>0.0001 ETH ➔ <strong>USDC</strong></span>
-                </span>
+                <span>🔄 0.0001 ETH ➔ <strong className="text-white">USDC</strong></span>
                 <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">Uniswap V3</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => { 
-                  const p = 'Swap 0.0001 ETH for USDT';
-                  setPrompt(p); 
-                  handleRunAgent(p); 
-                }}
-                className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-emerald-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
+                onClick={() => { const p = '1 USDC al ETH ile'; setPrompt(p); handleRunAgent(p); }}
+                className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-emerald-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-emerald-400 font-bold">🔄</span>
-                  <span>0.0001 ETH ➔ <strong>USDT</strong></span>
-                </span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">Uniswap V3</span>
+                <span>🔄 1 USDC al <strong className="text-white">ETH ile</strong></span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">Base Intent Engine</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => { 
-                  const p = 'Swap 0.0001 ETH for DAI';
-                  setPrompt(p); 
-                  handleRunAgent(p); 
-                }}
-                className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-amber-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
+                onClick={() => { const p = 'Swap 0.0001 ETH for DAI'; setPrompt(p); handleRunAgent(p); }}
+                className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-amber-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-amber-400 font-bold">🔄</span>
-                  <span>0.0001 ETH ➔ <strong>DAI</strong></span>
-                </span>
+                <span>🔄 0.0001 ETH ➔ <strong className="text-white">DAI</strong></span>
                 <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">Uniswap V3</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => { 
-                  const p = 'Swap 0.0001 ETH for AERO';
-                  setPrompt(p); 
-                  handleRunAgent(p); 
-                }}
-                className="p-3 rounded-xl bg-[#010308] border border-slate-800 hover:border-indigo-500/60 hover:bg-slate-900/80 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
+                onClick={() => { const p = 'Swap 0.0001 ETH for AERO'; setPrompt(p); handleRunAgent(p); }}
+                className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-indigo-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span className="flex items-center gap-2">
-                  <span className="text-indigo-400 font-bold">🔄</span>
-                  <span>0.0001 ETH ➔ <strong>AERO</strong></span>
-                </span>
+                <span>🔄 0.0001 ETH ➔ <strong className="text-white">AERO</strong></span>
                 <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">Aerodrome Protocol</span>
               </button>
             </div>
           </div>
         </div>
 
-        {/* TRANSACTION SUCCESS CARD */}
-        {lastTxHash && (
-          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono flex items-center justify-between shadow-xl backdrop-blur-md">
-            <div className="flex items-center gap-2">
-              <span className="text-base">🎉</span>
-              <div>
-                <div className="font-bold">Transaction Successfully Broadcasted!</div>
-                <div className="text-[11px] text-emerald-400/80">Confirmed on {isSepolia ? 'Base Sepolia' : 'Base Mainnet'}</div>
-              </div>
-            </div>
-            <a 
-              href={isSepolia ? `https://sepolia.basescan.org/tx/${lastTxHash}` : `https://base.blockscout.com/tx/${lastTxHash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 transition font-bold"
-            >
-              View Block Explorer ↗
-            </a>
-          </div>
-        )}
-
-        {/* TELEMETRY LOGS */}
-        <div className="bg-[#010206] border border-slate-800/80 rounded-2xl p-4 font-mono text-xs space-y-2.5 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5 text-[11px]">
-            <span className="text-slate-400 font-bold flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+        {/* REALTIME AGENT TELEMETRY LOGS */}
+        <div className="bg-[#080d1a] border border-slate-800 rounded-2xl p-4 font-mono text-xs space-y-2">
+          <div className="flex justify-between items-center text-slate-400 border-b border-slate-800/60 pb-2">
+            <span className="flex items-center gap-2">
+              <span className="h-2 w-2 bg-emerald-400 rounded-full animate-ping"></span>
               REALTIME AGENT TELEMETRY LOGS
             </span>
-            <span className="text-slate-500">LIVE FEED</span>
+            <span className="text-[10px] text-slate-500">LIVE FEED</span>
           </div>
 
-          <div className="space-y-1.5 max-h-40 overflow-y-auto pr-2">
-            {agentLogs.map((log, i) => (
-              <div key={i} className="leading-relaxed flex items-start gap-2 text-[11px]">
-                <span className="text-blue-500 font-bold shrink-0">›</span>
-                <span className={
-                  log.includes('SUCCESS') 
-                    ? 'text-emerald-400 font-bold' 
-                    : log.includes('ROUTE_FOUND') 
-                    ? 'text-blue-300' 
-                    : log.includes('EXECUTION_REVERTED')
-                    ? 'text-red-400 font-bold'
-                    : 'text-slate-300'
-                }>
-                  {log}
-                </span>
-              </div>
-            ))}
+          <div className="h-32 overflow-y-auto space-y-1 pr-2 text-slate-300 bg-[#02040a] p-3 rounded-xl border border-slate-900">
+            <p className="text-slate-500">[SYSTEM] Agent initialized on Base Mainnet...</p>
+            <p className="text-blue-400">[INTENT_RECEIVE] "Swap 0.0001 ETH for USDC"</p>
+            <p className="text-emerald-400">[ROUTE_FOUND] ETH ➔ USDC via Uniswap V3 (Fee: 500)</p>
+            <p className="text-amber-400">[PROMPTING_WALLET] Please approve transaction in wallet...</p>
           </div>
         </div>
 
       </div>
-    </main>
+    </div>
   );
 }
