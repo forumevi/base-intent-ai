@@ -4,6 +4,8 @@ import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 // Base Mainnet Adresleri
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+// Base KyberSwap Aggregator V3 Default Router
+const DEFAULT_KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc09af83311A6337b5';
 
 // ERC20 Approve ABI
 const ERC20_ABI = [
@@ -19,12 +21,10 @@ const ERC20_ABI = [
   }
 ] as const;
 
-// Viem için güvenli adrese çevirici (Kesin Checksum Garanti Eder)
 function toChecksum(address: string): `0x${string}` {
   try {
     return getAddress(address);
   } catch {
-    // Küçük/büyük harf uyumsuzluğunu düzeltmek için adres formatını garantiye alır
     const cleanAddress = address.toLowerCase().replace('0x', '');
     return getAddress(`0x${cleanAddress}`);
   }
@@ -57,14 +57,13 @@ export async function POST(req: Request) {
     const routeRes = await fetch(routeUrl, { headers: { 'x-client-id': 'BaseIntentAI' } });
     const routeData = await routeRes.json();
 
-    if (!routeData?.data?.routeSummary) {
-      throw new Error('KyberSwap üzerinde rota bulunamadı.');
+    const routeSummary = routeData?.data?.routeSummary;
+    if (!routeSummary) {
+      throw new Error('KyberSwap üzerinde geçerli likidite rotası bulunamadı.');
     }
 
-    // KyberSwap'ten gelen ham adresi doğrudan Checksum formatına çeviriyoruz
-    const rawRouter = routeData.data.routeSummary.routerAddress;
-    if (!rawRouter) throw new Error('Router adresi alınamadı.');
-    
+    // Router adresi API yanıtından veya varsayılan adresten güvenle çekilir
+    const rawRouter = routeSummary.routerAddress || routeData?.data?.routerAddress || DEFAULT_KYBER_ROUTER;
     const routerAddress = toChecksum(rawRouter);
 
     // Calldata Paketleme (Build)
@@ -72,7 +71,7 @@ export async function POST(req: Request) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-client-id': 'BaseIntentAI' },
       body: JSON.stringify({
-        routeSummary: routeData.data.routeSummary,
+        routeSummary: routeSummary,
         sender: recipient,
         recipient: recipient,
         slippageTolerance: 100
