@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther, parseUnits, getAddress } from 'viem';
 
-// Base Mainnet Likiditesi Yüksek Doğrulanmış Kontratlar
 const BASE_TOKENS: Record<string, { address: `0x${string}`; fee: number; decimals: number }> = {
   ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
   WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
@@ -36,19 +35,35 @@ const SWAP_ROUTER_ABI = [
 ] as const;
 
 function parseIntent(prompt: string) {
-  const cleanPrompt = prompt.trim().toLowerCase();
-  const amountMatch = cleanPrompt.match(/(\d+(\.\d+)?)/);
-  const amount = amountMatch ? amountMatch[0] : '0.0001';
+  const p = prompt.toLowerCase();
+  
+  // Miktar bulma (varsayılan: 0.0001 ETH veya 1 USDC)
+  const amountMatch = p.match(/(\d+(\.\d+)?)/);
+  let rawAmount = amountMatch ? amountMatch[0] : null;
 
   let sellToken = 'ETH';
   let buyToken = 'USDC';
 
-  if (cleanPrompt.includes('cbeth')) buyToken = 'CBETH';
-  else if (cleanPrompt.includes('dai')) buyToken = 'DAI';
-  else if (cleanPrompt.includes('aero')) buyToken = 'AERO';
-  else if (cleanPrompt.includes('usdc')) buyToken = 'USDC';
+  // "USDC ile ETH al" / "Buy ETH with USDC" mantığı
+  const isBuyingEthWithUsdc = 
+    (p.includes('usdc') && (p.includes('eth al') || p.includes('buy eth') || p.includes('for eth') || p.includes('to eth'))) ||
+    (p.indexOf('usdc') < p.indexOf('eth') && (p.includes('with') || p.includes('ile')));
 
-  return { sellToken, buyToken, amount };
+  if (isBuyingEthWithUsdc) {
+    sellToken = 'USDC';
+    buyToken = 'ETH';
+    if (!rawAmount) rawAmount = '1'; // Varsayılan 1 USDC
+  } else if (p.includes('cbeth')) {
+    buyToken = 'CBETH';
+  } else if (p.includes('dai')) {
+    buyToken = 'DAI';
+  } else if (p.includes('aero')) {
+    buyToken = 'AERO';
+  }
+
+  if (!rawAmount) rawAmount = '0.0001';
+
+  return { sellToken, buyToken, amount: rawAmount };
 }
 
 export async function POST(req: Request) {
@@ -60,36 +75,40 @@ export async function POST(req: Request) {
     }
 
     const intent = parseIntent(prompt);
-    const sellTokenObj = BASE_TOKENS[intent.sellToken];
-    const buyTokenObj = BASE_TOKENS[intent.buyToken];
+    const sellObj = BASE_TOKENS[intent.sellToken];
+    const buyObj = BASE_TOKENS[intent.buyToken];
 
-    const sellAmountWei = parseEther(intent.amount);
+    // Miktarı token'ın kendi decimal değerine göre çevir
+    const amountInWei = parseUnits(intent.amount, sellObj.decimals);
 
-    // Eğer cüzdan bağlı değilse veya boşsa fallback address kullanımı
     const recipientAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
       : getAddress('0x0000000000000000000000000000000000000000');
 
+    // Uniswap V3 Calldata Oluşturma
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
-        tokenIn: getAddress(sellTokenObj.address),
-        tokenOut: getAddress(buyTokenObj.address),
-        fee: buyTokenObj.fee,
+        tokenIn: sellObj.address,
+        tokenOut: buyObj.address,
+        fee: sellObj.fee || buyObj.fee,
         recipient: recipientAddress,
-        amountIn: sellAmountWei,
+        amountIn: amountInWei,
         amountOutMinimum: BigInt(0),
         sqrtPriceLimitX96: BigInt(0)
       }]
     });
 
+    // Satılan token ETH ise wei gönderilir, ERC-20 ise value = 0x0
+    const txValue = intent.sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0';
+
     return NextResponse.json({
       success: true,
       data: {
-        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Uniswap V3 SwapRouter02
+        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Uniswap V3 Router
         data: swapCalldata,
-        value: `0x${sellAmountWei.toString(16)}`,
+        value: txValue,
         sellToken: intent.sellToken,
         buyToken: intent.buyToken,
         amount: intent.amount
