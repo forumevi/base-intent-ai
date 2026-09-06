@@ -2,13 +2,11 @@ import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
-// 1. Base Mainnet RPC Client
 const publicClient = createPublicClient({
   chain: base,
   transport: http('https://mainnet.base.org')
 });
 
-// 2. Desteklenen Tokenlar
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
   ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
   WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
@@ -18,18 +16,16 @@ const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> 
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
 
-// 3. Uniswap V3 Havuz Fee Tespiti
 function getOptimalFeeTier(sellToken: string, buyToken: string): number {
   const pair = `${sellToken}-${buyToken}`;
-  if (pair.includes('CBETH')) return 100;   // %0.01
-  if (pair.includes('AERO')) return 3000;   // %0.30
-  if (pair.includes('DAI')) return 100;     // %0.01
-  return 500;                               // %0.05
+  if (pair.includes('CBETH')) return 100;   // %0.01 Pool (cbETH/ETH ana likiditesi)
+  if (pair.includes('AERO')) return 3000;   // %0.30 Pool
+  if (pair.includes('DAI')) return 100;     // %0.01 Pool
+  return 500;                               // %0.05 Pool (USDC/ETH)
 }
 
 const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
 
-// Uniswap V3 Swap Router ABI
 const SWAP_ROUTER_ABI = [
   {
     inputs: [
@@ -60,13 +56,6 @@ const SWAP_ROUTER_ABI = [
     outputs: [{ name: 'results', type: 'bytes[]' }],
     stateMutability: 'payable',
     type: 'function'
-  },
-  {
-    inputs: [],
-    name: 'refundETH',
-    outputs: [],
-    stateMutability: 'payable',
-    type: 'function'
   }
 ] as const;
 
@@ -80,7 +69,6 @@ const ERC20_ABI = [
   }
 ] as const;
 
-// LLM Çağrısı (Fallback Modelleri)
 async function fetchLLMWithFallback(apiKey: string, prompt: string) {
   const models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
   const systemPrompt = `
@@ -139,13 +127,9 @@ export async function POST(req: Request) {
     const apiKey = process.env.GROQ_API_KEY?.trim();
 
     if (!apiKey) {
-      return NextResponse.json({ 
-        success: false, 
-        error: "Groq API Key bulunamadı." 
-      }, { status: 500 });
+      return NextResponse.json({ success: false, error: "Groq API Key bulunamadı." }, { status: 500 });
     }
 
-    // 1. LLM Niyet Analizi
     const parsedIntent = await fetchLLMWithFallback(apiKey, prompt);
 
     const sellToken = (parsedIntent.sellToken || 'ETH').toUpperCase();
@@ -154,7 +138,6 @@ export async function POST(req: Request) {
     const sellObj = BASE_TOKENS[sellToken] || BASE_TOKENS.ETH;
     const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.USDC;
 
-    // 2. On-Chain Bakiyenin Dinamik Okunması
     let amountInWei: bigint;
     let finalAmountStr = String(parsedIntent.amount || '0.0001');
 
@@ -182,56 +165,33 @@ export async function POST(req: Request) {
     }
 
     if (amountInWei <= BigInt(0)) {
-      return NextResponse.json({ 
-        success: false, 
-        error: `Cüzdanınızda yeterli ${sellToken} bakiyesi bulunamadı.` 
-      }, { status: 400 });
+      return NextResponse.json({ success: false, error: `Cüzdanınızda yeterli ${sellToken} bakiyesi bulunamadı.` }, { status: 400 });
     }
 
     const feeTier = getOptimalFeeTier(sellToken, buyToken);
-    const recipientAddress = (userAddress && userAddress.startsWith('0x')) 
-      ? getAddress(userAddress) 
-      : UNISWAP_ROUTER;
+    const recipientAddress = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : UNISWAP_ROUTER;
 
-    // 3. Calldata Oluşturma
-    let finalCalldata: `0x${string}`;
-
-    const exactInputData = encodeFunctionData({
+    // Uniswap V3 exactInputSingle Calldata
+    const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
         tokenIn: sellObj.address,
         tokenOut: buyObj.address,
         fee: feeTier,
-        recipient: sellToken === 'ETH' ? '0x0000000000000000000000000000000000000000' : recipientAddress,
+        recipient: recipientAddress,
         amountIn: amountInWei,
-        amountOutMinimum: BigInt(1),
+        amountOutMinimum: BigInt(0),
         sqrtPriceLimitX96: BigInt(0)
       }]
     });
-
-    if (sellToken === 'ETH') {
-      const refundETHData = encodeFunctionData({
-        abi: SWAP_ROUTER_ABI,
-        functionName: 'refundETH',
-        args: []
-      });
-
-      finalCalldata = encodeFunctionData({
-        abi: SWAP_ROUTER_ABI,
-        functionName: 'multicall',
-        args: [[exactInputData, refundETHData]]
-      });
-    } else {
-      finalCalldata = exactInputData;
-    }
 
     return NextResponse.json({
       success: true,
       data: {
         ...parsedIntent,
         to: UNISWAP_ROUTER,
-        data: finalCalldata,
+        data: swapCalldata,
         value: sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0',
         sellToken,
         buyToken,
@@ -244,7 +204,7 @@ export async function POST(req: Request) {
             action: `Swap ${finalAmountStr} ${sellToken} for ${buyToken}`,
             targetContract: UNISWAP_ROUTER,
             estimatedGasUsd: "$0.01",
-            details: { calldata: finalCalldata }
+            details: { calldata: swapCalldata }
           }
         ]
       }
@@ -252,9 +212,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("API Intent Error:", error);
-    return NextResponse.json({ 
-      success: false, 
-      error: error.message || "Intent işlenirken beklenmeyen bir hata oluştu." 
-    }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Intent işlenirken beklenmeyen bir hata oluştu." }, { status: 500 });
   }
 }
