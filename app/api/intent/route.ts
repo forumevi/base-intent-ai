@@ -1,116 +1,115 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 
+// Base Token Adresleri
 const WETH = getAddress('0x4200000000000000000000000000000000000006');
-const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
+const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+const CBETH = getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498');
+const DAI = getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb');
+const AERO = getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58');
 
-const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
-  ETH:   { address: WETH, decimals: 18 },
-  WETH:  { address: WETH, decimals: 18 },
-  USDC:  { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), decimals: 6 },
-  CBETH: { address: getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498'), decimals: 18 },
-  DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), decimals: 18 },
-  AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
-};
+// Aerodrome V2 Router (Base Mainnet)
+const AERODROME_ROUTER = getAddress('0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43');
 
-const MULTICALL_ABI = [
-  {
-    inputs: [{ name: 'data', type: 'bytes[]' }],
-    name: 'multicall',
-    outputs: [{ name: 'results', type: 'bytes[]' }],
-    stateMutability: 'payable',
-    type: 'function'
-  }
-] as const;
-
-const SWAP_ROUTER_ABI = [
+// Aerodrome Router V2 ABI
+const AERODROME_ROUTER_ABI = [
   {
     inputs: [
+      { name: 'amountOutMin', type: 'uint256' },
       {
         components: [
-          { name: 'tokenIn', type: 'address' },
-          { name: 'tokenOut', type: 'address' },
-          { name: 'fee', type: 'uint24' },
-          { name: 'recipient', type: 'address' },
-          { name: 'amountIn', type: 'uint256' },
-          { name: 'amountOutMinimum', type: 'uint256' },
-          { name: 'sqrtPriceLimitX96', type: 'uint160' }
+          { name: 'from', type: 'address' },
+          { name: 'to', type: 'address' },
+          { name: 'stable', type: 'bool' },
+          { name: 'factory', type: 'address' }
         ],
-        name: 'params',
-        type: 'tuple'
-      }
+        name: 'routes',
+        type: 'tuple[]'
+      },
+      { name: 'to', type: 'address' },
+      { name: 'deadline', type: 'uint256' }
     ],
-    name: 'exactInputSingle',
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    name: 'swapExactETHForTokens',
+    outputs: [{ name: 'amounts', type: 'uint256[]' }],
     stateMutability: 'payable',
     type: 'function'
   }
 ] as const;
+
+// Base Aerodrome V2 Pool Yapılandırma Haritası
+// cbETH/WETH -> Stable Pool (true)
+// USDC/WETH -> Volatile Pool (false)
+const POOL_CONFIG: Record<string, { address: `0x${string}`; isStable: boolean }> = {
+  CBETH: { address: CBETH, isStable: true },
+  USDC:  { address: USDC, isStable: false },
+  DAI:   { address: DAI, isStable: true },
+  AERO:  { address: AERO, isStable: false }
+};
 
 export async function POST(req: Request) {
   try {
     const { prompt, userAddress } = await req.json();
 
-    // Dinamik Prompt Analizi
+    // Token Tespiti
     let buyToken = "CBETH";
     if (prompt.includes("USDC")) buyToken = "USDC";
     if (prompt.includes("DAI")) buyToken = "DAI";
     if (prompt.includes("AERO")) buyToken = "AERO";
 
-    const sellToken = "ETH";
-    const amountStr = "0.0001";
+    const tokenConfig = POOL_CONFIG[buyToken] || POOL_CONFIG.CBETH;
+    const amountInWei = parseUnits("0.0001", 18);
+    const recipient = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : AERODROME_ROUTER;
 
-    const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.CBETH;
-    const amountInWei = parseUnits(amountStr, 18);
-    const recipient = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : UNISWAP_ROUTER;
+    // Aerodrome V2 Factory Adresi
+    const AERODROME_FACTORY = getAddress('0x4200000000000000000000000000000000000006'); // Default Pool Factory
 
-    // Token bazlı kesin fee tier (cbETH/WETH havuzu %0.01 yani 100 olmak zorundadır)
-    const feeTier = buyToken === 'CBETH' || buyToken === 'DAI' ? 100 : 500;
+    // 20 Dakikalık Geçerli Deadline (Aksi takdirde Revert eder)
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
 
-    // 1. Swap Adımının Calldata'sı
-    const swapCallData = encodeFunctionData({
-      abi: SWAP_ROUTER_ABI,
-      functionName: 'exactInputSingle',
-      args: [{
-        tokenIn: WETH,
-        tokenOut: buyObj.address,
-        fee: feeTier,
-        recipient: recipient,
-        amountIn: amountInWei,
-        amountOutMinimum: BigInt(0),
-        sqrtPriceLimitX96: BigInt(0)
-      }]
-    });
+    // Aerodrome Rota Dizisi
+    const routes = [
+      {
+        from: WETH,
+        to: tokenConfig.address,
+        stable: tokenConfig.isStable,
+        factory: '0x4200000000000000000000000000000000000006' as `0x${string}` // Standard Aerodrome V2 Pool
+      }
+    ];
 
-    // 2. Multicall İle Paketlenmiş Final Calldata
-    const multicallData = encodeFunctionData({
-      abi: MULTICALL_ABI,
-      functionName: 'multicall',
-      args: [[swapCallData]]
+    // Calldata Encode İşlemi
+    const swapCalldata = encodeFunctionData({
+      abi: AERODROME_ROUTER_ABI,
+      functionName: 'swapExactETHForTokens',
+      args: [
+        BigInt(0), // amountOutMin (Slippage hatasını engeller)
+        routes,
+        recipient,
+        deadline
+      ]
     });
 
     return NextResponse.json({
       success: true,
       data: {
-        to: UNISWAP_ROUTER,
-        data: multicallData,
+        to: AERODROME_ROUTER,
+        data: swapCalldata,
         value: `0x${amountInWei.toString(16)}`,
-        sellToken,
-        buyToken,
-        amount: amountStr,
+        sellToken: "ETH",
+        buyToken: buyToken,
+        amount: "0.0001",
         executionBatch: [
           {
             step: 1,
-            action: `Swap ${amountStr} ${sellToken} for ${buyToken}`,
-            targetContract: UNISWAP_ROUTER,
+            action: `Swap 0.0001 ETH for ${buyToken} on Aerodrome`,
+            targetContract: AERODROME_ROUTER,
             estimatedGasUsd: "$0.01",
-            details: { calldata: multicallData }
+            details: { calldata: swapCalldata }
           }
         ]
       }
     });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Hata oluştu" }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Routing Failed" }, { status: 500 });
   }
 }
