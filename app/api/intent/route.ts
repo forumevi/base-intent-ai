@@ -24,12 +24,12 @@ function getOptimalFeeTier(sellToken: string, buyToken: string): number {
   if (pair.includes('CBETH')) return 100;   // %0.01
   if (pair.includes('AERO')) return 3000;   // %0.30
   if (pair.includes('DAI')) return 100;     // %0.01
-  return 500;                               // %0.05 (USDC/ETH vb.)
+  return 500;                               // %0.05
 }
 
 const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
 
-// Uniswap V3 Swap Router ABI (Multicall & ExactInput)
+// Uniswap V3 Swap Router ABI
 const SWAP_ROUTER_ABI = [
   {
     inputs: [
@@ -62,9 +62,7 @@ const SWAP_ROUTER_ABI = [
     type: 'function'
   },
   {
-    inputs: [
-      { name: 'value', type: 'uint256' }
-    ],
+    inputs: [],
     name: 'refundETH',
     outputs: [],
     stateMutability: 'payable',
@@ -205,14 +203,13 @@ export async function POST(req: Request) {
         tokenIn: sellObj.address,
         tokenOut: buyObj.address,
         fee: feeTier,
-        recipient: sellToken === 'ETH' ? '0x0000000000000000000000000000000000000000' : recipientAddress, // Multicall için
+        recipient: sellToken === 'ETH' ? '0x0000000000000000000000000000000000000000' : recipientAddress,
         amountIn: amountInWei,
-        amountOutMinimum: BigInt(1), // Simülasyon Koruması (Slippage Trigger)
+        amountOutMinimum: BigInt(1),
         sqrtPriceLimitX96: BigInt(0)
       }]
     });
 
-    // Native ETH satılıyorsa Uniswap Multicall Mimarisi Kullanılmalı
     if (sellToken === 'ETH') {
       const refundETHData = encodeFunctionData({
         abi: SWAP_ROUTER_ABI,
