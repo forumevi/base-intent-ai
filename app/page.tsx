@@ -7,7 +7,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [userAddress, setUserAddress] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([
-    '[SYSTEM] Agent initialized on Base Mainnet...'
+    '[SYSTEM] Agent initialized on Base Mainnet...',
+    '[LLM_ENGINE] Groq Llama-3.3-70B Ready'
   ]);
 
   const addLog = (msg: string) => {
@@ -53,7 +54,7 @@ export default function Home() {
         }
       }
 
-      addLog('[PARSING] Evaluating Base Mainnet Liquidity Routes...');
+      addLog('[LLM_AGENT] Parsing intent via Llama-3.3-70B...');
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,16 +68,37 @@ export default function Home() {
       }
 
       const txData = result.data;
-      addLog(`[ROUTE_FOUND] ${txData.sellToken} ➔ ${txData.buyToken} via Uniswap V3`);
-      addLog('[PROMPTING_WALLET] Please approve transaction in wallet...');
+      addLog(`[ROUTE_FOUND] ${txData.sellToken} ➔ ${txData.buyToken} via Router`);
 
+      // ERC-20 Token satılıyorsa (USDC, DAI vb.) önce Uniswap Router'a Approve verilir
+      if (txData.sellToken !== 'ETH' && txData.sellTokenAddress && txData.amountInWei) {
+        addLog(`[APPROVAL_REQUIRED] Requesting ${txData.sellToken} allowance...`);
+        
+        const spenderPadded = txData.to.toLowerCase().replace('0x', '').padStart(64, '0');
+        const amountPadded = BigInt(txData.amountInWei).toString(16).padStart(64, '0');
+        const approveData = `0x095ea7b3${spenderPadded}${amountPadded}`;
+
+        const approveTx = await (window as any).ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: currentAddress,
+            to: txData.sellTokenAddress,
+            data: approveData,
+            value: '0x0'
+          }]
+        });
+        addLog(`[APPROVED] Tx Hash: ${approveTx.slice(0, 10)}... Proceeding to swap...`);
+      }
+
+      // Swap işlemini cüzdana gönderme
+      addLog('[PROMPTING_WALLET] Please approve swap transaction in wallet...');
       const txHash = await (window as any).ethereum.request({
         method: 'eth_sendTransaction',
         params: [{
           from: currentAddress,
           to: txData.to,
           data: txData.data,
-          value: txData.value
+          value: txData.sellToken === 'ETH' ? txData.value : '0x0'
         }]
       });
 
@@ -192,7 +214,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* EXAMPLES (SEÇİNCE SADECE METNİ DOLDURUR) */}
+          {/* EXAMPLES (CLICK TO FILL) */}
           <div className="space-y-2 pt-2">
             <div className="text-[11px] text-slate-400 font-bold font-mono tracking-wider">
               ⚡ POPULAR INTENT EXAMPLES (CLICK TO FILL)
@@ -228,11 +250,11 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => setPrompt('Swap 0.0001 ETH for AERO')}
+                onClick={() => setPrompt('Buy ETH with USDC in my wallet')}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-indigo-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
-                <span>🔄 0.0001 ETH ➔ <strong className="text-white">AERO</strong></span>
-                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">Aerodrome Protocol</span>
+                <span>🔄 Buy ETH with USDC</span>
+                <span className="text-[10px] bg-indigo-500/10 text-indigo-400 px-2 py-0.5 rounded border border-indigo-500/20">Uniswap V3</span>
               </button>
             </div>
           </div>
@@ -253,7 +275,7 @@ export default function Home() {
               <p key={index} className={
                 log.includes('EXECUTION_SUCCESS') ? 'text-emerald-400 font-bold' :
                 log.includes('EXECUTION_FAILED') ? 'text-red-400' :
-                log.includes('ROUTE_FOUND') ? 'text-blue-400' : 'text-slate-400'
+                log.includes('ROUTE_FOUND') || log.includes('APPROVED') ? 'text-blue-400' : 'text-slate-400'
               }>
                 {log}
               </p>
