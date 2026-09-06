@@ -61,7 +61,7 @@ Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model: 'llama-3.1-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
