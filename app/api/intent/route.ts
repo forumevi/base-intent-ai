@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther, parseUnits, getAddress } from 'viem';
 
-// Base Mainnet Checksummed Valid Token Addresses
 const BASE_TOKENS: Record<string, { address: `0x${string}`; fee: number; decimals: number }> = {
   ETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
   WETH: { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
   USDC: { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), fee: 500, decimals: 6 },
-  USDT: { address: getAddress('0xfde4C96cDB63B34c82808dd471eC8f6c321A8839'), fee: 100, decimals: 6 },
-  DAI:  { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), fee: 100, decimals: 18 },
+  USDT: { address: getAddress('0xfde4C96cDB63B34c82808dd471eC8f6c321A8839'), fee: 500, decimals: 6 },
+  DAI:  { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), fee: 500, decimals: 18 },
   AERO: { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), fee: 3000, decimals: 18 }
 };
 
@@ -35,55 +34,47 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
-function parsePromptDirectly(prompt: string) {
-  const p = prompt.toUpperCase();
-  
-  const amountMatch = prompt.match(/(\d+(\.\d+)?)/);
-  let rawAmount = amountMatch ? parseFloat(amountMatch[0]) : 0.0001;
+function parseGroundedIntent(prompt: string) {
+  const cleanPrompt = prompt.trim();
+  const lower = cleanPrompt.toLowerCase();
 
-  const tokens = ['ETH', 'USDC', 'USDT', 'DAI', 'AERO'];
+  // Prompt içerisindeki rakamı al (Örn: "1 usdc..." -> 1)
+  const amountMatch = cleanPrompt.match(/(\d+(\.\d+)?)/);
+  const targetAmount = amountMatch ? amountMatch[0] : '0.0001';
+
   let sellToken = 'ETH';
   let buyToken = 'USDC';
 
-  const foundTokens = tokens.filter(t => p.includes(t));
+  // Türkçe / İngilizce "AL / BUY" Tespiti
+  const isBuyIntent = lower.includes('al') || lower.includes('buy') || lower.includes('get');
 
-  if (foundTokens.length >= 2) {
-    if (p.includes('FOR') || p.includes('TO') || p.includes('INTO')) {
-      const parts = p.split(/FOR|TO|INTO/);
-      const leftToken = tokens.find(t => parts[0].includes(t));
-      const rightToken = tokens.find(t => parts[1]?.includes(t));
-      if (leftToken) sellToken = leftToken;
-      if (rightToken) buyToken = rightToken;
-    } else if (p.includes('BUY') || p.includes('GET')) {
-      const buyIndex = p.indexOf('BUY') !== -1 ? p.indexOf('BUY') : p.indexOf('GET');
-      const targetToken = tokens.find(t => p.indexOf(t) < buyIndex);
-      const payToken = tokens.find(t => p.indexOf(t) > buyIndex);
-      if (payToken) sellToken = payToken;
-      if (targetToken) buyToken = targetToken;
-    } else {
-      sellToken = foundTokens[0];
-      buyToken = foundTokens[1];
-    }
-  } else if (foundTokens.length === 1) {
-    if (foundTokens[0] === 'ETH') {
-      sellToken = 'ETH';
-      buyToken = 'USDC';
-    } else {
-      sellToken = 'ETH';
-      buyToken = foundTokens[0];
-    }
-  }
+  if (isBuyIntent) {
+    // Örn: "1 usdc al eth ile" -> Rakamdan hemen sonraki token Alınacak Token'dır.
+    if (lower.includes('usdc')) buyToken = 'USDC';
+    else if (lower.includes('usdt')) buyToken = 'USDT';
+    else if (lower.includes('dai')) buyToken = 'DAI';
+    else if (lower.includes('aero')) buyToken = 'AERO';
 
-  if (sellToken === 'ETH' && rawAmount > 0.005) {
-    rawAmount = 0.0001;
+    // Ödeme aracı olan token'ı tespit et
+    if (lower.includes('eth ile') || lower.includes('with eth') || lower.includes('pay eth')) {
+      sellToken = 'ETH';
+    } else if (lower.includes('usdc ile')) {
+      sellToken = 'USDC';
+    }
+  } else {
+    // Standart "SWAP/SAT" Cümle Yapısı (Örn: "0.001 eth swap to usdc")
+    if (lower.includes('eth')) sellToken = 'ETH';
+    if (lower.includes('usdc')) buyToken = 'USDC';
+    if (lower.includes('usdt')) buyToken = 'USDT';
+    if (lower.includes('dai')) buyToken = 'DAI';
+    if (lower.includes('aero')) buyToken = 'AERO';
   }
 
   return {
-    intentType: 'SWAP',
     sellToken,
     buyToken,
-    amount: rawAmount.toString(),
-    confidenceScore: 0.99
+    amount: targetAmount,
+    isBuyIntent
   };
 }
 
@@ -95,20 +86,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });
     }
 
-    const intent = parsePromptDirectly(prompt);
+    const intent = parseGroundedIntent(prompt);
     
     const sellTokenObj = BASE_TOKENS[intent.sellToken] || BASE_TOKENS.ETH;
     const buyTokenObj = BASE_TOKENS[intent.buyToken] || BASE_TOKENS.USDC;
 
-    const sellAmountWei = intent.sellToken === 'ETH' 
-      ? parseEther(intent.amount) 
-      : parseUnits(intent.amount, sellTokenObj.decimals);
+    // Yaklaşık ETH/USD kuru hesaplama (1 USDC/USDT almak için gereken ~ETH miktarı)
+    // 1 ETH ≈ $2500 kabulü üzerinden dynamic wei hesabı
+    let sellAmountWei: bigint;
+
+    if (intent.isBuyIntent && intent.sellToken === 'ETH') {
+      const targetBuyAmount = parseFloat(intent.amount); // Örn: 1 USDC
+      const estimatedEthRequired = targetBuyAmount / 2500; // ~0.0004 ETH
+      sellAmountWei = parseEther(estimatedEthRequired.toFixed(8));
+    } else {
+      sellAmountWei = intent.sellToken === 'ETH' 
+        ? parseEther(intent.amount) 
+        : parseUnits(intent.amount, sellTokenObj.decimals);
+    }
 
     const validUserAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
       : getAddress('0x0000000000000000000000000000000000000000');
 
-    // Multicall kullanmadan doğrudan exactInputSingle calldata hazırlama
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
@@ -125,7 +125,7 @@ export async function POST(req: Request) {
 
     const aggregatorQuote = {
       transaction: {
-        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Base SwapRouter02
+        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'),
         data: swapCalldata,
         value: intent.sellToken === 'ETH' ? `0x${sellAmountWei.toString(16)}` : '0x0'
       }
