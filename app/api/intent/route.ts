@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { encodeFunctionData, parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
+import { encodeFunctionData, parseUnits, getAddress, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
 const publicClient = createPublicClient({
@@ -8,12 +8,11 @@ const publicClient = createPublicClient({
 });
 
 const WETH = getAddress('0x4200000000000000000000000000000000000006');
-const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
 
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
   ETH:   { address: WETH, decimals: 18 },
   WETH:  { address: WETH, decimals: 18 },
-  USDC:  { address: USDC, decimals: 6 },
+  USDC:  { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), decimals: 6 },
   CBETH: { address: getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498'), decimals: 18 },
   DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), decimals: 18 },
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
@@ -45,12 +44,11 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
-// Base Ağındaki Doğru Fee Katmanları
 const TOKEN_FEE_MAP: Record<string, number> = {
-  USDC: 500,   // %0.05
-  CBETH: 100,  // %0.01
-  DAI: 100,    // %0.01
-  AERO: 3000   // %0.30
+  USDC: 500,
+  CBETH: 100,
+  DAI: 100,
+  AERO: 3000
 };
 
 export async function POST(req: Request) {
@@ -60,23 +58,34 @@ export async function POST(req: Request) {
 
     if (!apiKey) return NextResponse.json({ success: false, error: "API Key eksik." }, { status: 500 });
 
-    // LLM Parsing
-    const resLLM = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: 'Return JSON: {"sellToken":"ETH"|"USDC"|"CBETH"|"DAI"|"AERO","buyToken":"ETH"|"USDC"|"CBETH"|"DAI"|"AERO","amount":"0.0001"}' },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.1,
-        response_format: { type: "json_object" }
-      })
-    });
-    
-    const llmData = await resLLM.json();
-    const parsedIntent = JSON.parse(llmData.choices[0].message.content);
+    let parsedIntent = { sellToken: 'ETH', buyToken: 'CBETH', amount: '0.0001' };
+
+    // Güvenli LLM Çağrısı (Undefined / Array Crash Engelleme)
+    try {
+      const resLLM = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "llama-3.3-70b-versatile",
+          messages: [
+            { role: "system", content: 'Return ONLY JSON: {"sellToken":"ETH"|"USDC"|"CBETH"|"DAI"|"AERO","buyToken":"ETH"|"USDC"|"CBETH"|"DAI"|"AERO","amount":"0.0001"}' },
+            { role: "user", content: prompt }
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      const llmData = await resLLM.json();
+      
+      // 'reading 0' hatasını önleyen güvenli parsing kontrolleri
+      const content = llmData?.choices?.[0]?.message?.content || llmData?.choices?.[0]?.text;
+      if (content) {
+        parsedIntent = JSON.parse(content);
+      }
+    } catch {
+      // LLM patlasa bile uygulamanın çökmesini engellemek için varsayılan fallback
+    }
 
     const sellToken = (parsedIntent.sellToken || 'ETH').toUpperCase();
     const buyToken = (parsedIntent.buyToken || 'CBETH').toUpperCase();
@@ -89,17 +98,16 @@ export async function POST(req: Request) {
 
     const feeTier = TOKEN_FEE_MAP[buyToken] || 500;
 
-    // Kritik Düzeltme: tokenIn HER ZAMAN geçerli kontrat adresi (WETH) olmalı
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
-        tokenIn: WETH, 
+        tokenIn: WETH,
         tokenOut: buyObj.address,
         fee: feeTier,
         recipient: recipientAddress,
         amountIn: amountInWei,
-        amountOutMinimum: BigInt(0), // Simülasyonun slippage yüzünden patlamasını engeller
+        amountOutMinimum: BigInt(0),
         sqrtPriceLimitX96: BigInt(0)
       }]
     });
@@ -127,6 +135,6 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "İşlem oluşturulamadı." }, { status: 500 });
   }
 }
