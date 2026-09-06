@@ -1,14 +1,17 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseEther, parseUnits, getAddress } from 'viem';
 
-const BASE_TOKENS: Record<string, { address: `0x${string}`; fee: number; decimals: number }> = {
-  ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
-  WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), fee: 500, decimals: 18 },
-  USDC:  { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), fee: 500, decimals: 6 },
-  CBETH: { address: getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498'), fee: 500, decimals: 18 },
-  DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), fee: 500, decimals: 18 },
-  AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), fee: 3000, decimals: 18 }
+// Base Mainnet Doğrulanmış Kontrat Listesi
+const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
+  ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
+  WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
+  USDC:  { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), decimals: 6 },
+  CBETH: { address: getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498'), decimals: 18 },
+  DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), decimals: 18 },
+  AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
+
+const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
 
 const SWAP_ROUTER_ABI = [
   {
@@ -34,36 +37,48 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
-function parseIntent(prompt: string) {
-  const p = prompt.toLowerCase();
+// LLM Parsleme Çağrısı (Groq Llama 3.3-70B Entegrasyonu)
+async function parseIntentWithLLM(prompt: string) {
+  const apiKey = process.env.GROQ_API_KEY;
   
-  // Miktar bulma (varsayılan: 0.0001 ETH veya 1 USDC)
-  const amountMatch = p.match(/(\d+(\.\d+)?)/);
-  let rawAmount = amountMatch ? amountMatch[0] : null;
-
-  let sellToken = 'ETH';
-  let buyToken = 'USDC';
-
-  // "USDC ile ETH al" / "Buy ETH with USDC" mantığı
-  const isBuyingEthWithUsdc = 
-    (p.includes('usdc') && (p.includes('eth al') || p.includes('buy eth') || p.includes('for eth') || p.includes('to eth'))) ||
-    (p.indexOf('usdc') < p.indexOf('eth') && (p.includes('with') || p.includes('ile')));
-
-  if (isBuyingEthWithUsdc) {
-    sellToken = 'USDC';
-    buyToken = 'ETH';
-    if (!rawAmount) rawAmount = '1'; // Varsayılan 1 USDC
-  } else if (p.includes('cbeth')) {
-    buyToken = 'CBETH';
-  } else if (p.includes('dai')) {
-    buyToken = 'DAI';
-  } else if (p.includes('aero')) {
-    buyToken = 'AERO';
+  if (!apiKey) {
+    // Fallback if API key missing
+    return { sellToken: 'ETH', buyToken: 'USDC', amount: '0.0001' };
   }
 
-  if (!rawAmount) rawAmount = '0.0001';
+  const systemPrompt = `You are an AI DeFi Intent Parser for Base Mainnet. 
+Analyze the user query and output ONLY a raw JSON object (no markdown, no backticks) with 3 keys:
+- "sellToken": Symbol (ETH, USDC, CBETH, DAI, AERO)
+- "buyToken": Symbol (ETH, USDC, CBETH, DAI, AERO)
+- "amount": String representation of amount (e.g. "0.0001" or "1")
 
-  return { sellToken, buyToken, amount: rawAmount };
+Available tokens: ETH, USDC, CBETH, DAI, AERO.
+If user says "buy ETH with USDC", sellToken is USDC, buyToken is ETH.`;
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.1,
+      response_format: { type: 'json_object' }
+    })
+  });
+
+  const data = await response.json();
+  const parsed = JSON.parse(data.choices[0].message.content);
+  return {
+    sellToken: parsed.sellToken?.toUpperCase() || 'ETH',
+    buyToken: parsed.buyToken?.toUpperCase() || 'USDC',
+    amount: String(parsed.amount || '0.0001')
+  };
 }
 
 export async function POST(req: Request) {
@@ -74,25 +89,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });
     }
 
-    const intent = parseIntent(prompt);
-    const sellObj = BASE_TOKENS[intent.sellToken];
-    const buyObj = BASE_TOKENS[intent.buyToken];
+    // 1. LLM ile Intent Analizi Yapılıyor
+    const intent = await parseIntentWithLLM(prompt);
 
-    // Miktarı token'ın kendi decimal değerine göre çevir
+    const sellObj = BASE_TOKENS[intent.sellToken] || BASE_TOKENS.ETH;
+    const buyObj = BASE_TOKENS[intent.buyToken] || BASE_TOKENS.USDC;
+
     const amountInWei = parseUnits(intent.amount, sellObj.decimals);
 
     const recipientAddress = (userAddress && userAddress.startsWith('0x')) 
       ? getAddress(userAddress) 
-      : getAddress('0x0000000000000000000000000000000000000000');
+      : UNISWAP_ROUTER;
 
-    // Uniswap V3 Calldata Oluşturma
+    // 2. Uniswap V3 Calldata Hazırlığı
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
         tokenIn: sellObj.address,
         tokenOut: buyObj.address,
-        fee: sellObj.fee || buyObj.fee,
+        fee: 500,
         recipient: recipientAddress,
         amountIn: amountInWei,
         amountOutMinimum: BigInt(0),
@@ -100,18 +116,20 @@ export async function POST(req: Request) {
       }]
     });
 
-    // Satılan token ETH ise wei gönderilir, ERC-20 ise value = 0x0
-    const txValue = intent.sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0';
+    const isNativeEth = intent.sellToken === 'ETH';
 
     return NextResponse.json({
       success: true,
       data: {
-        to: getAddress('0x2626664c2603336E57B271c5C0b26F421741e481'), // Uniswap V3 Router
+        to: UNISWAP_ROUTER,
         data: swapCalldata,
-        value: txValue,
+        value: isNativeEth ? `0x${amountInWei.toString(16)}` : '0x0',
         sellToken: intent.sellToken,
         buyToken: intent.buyToken,
-        amount: intent.amount
+        amount: intent.amount,
+        sellTokenAddress: sellObj.address,
+        amountInWei: amountInWei.toString(),
+        requiresApproval: !isNativeEth
       }
     });
 
