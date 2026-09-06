@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { encodeFunctionData, parseUnits, formatUnits, getAddress, createPublicClient, http, encodePacked } from 'viem';
+import { parseUnits, formatUnits, getAddress, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
 const publicClient = createPublicClient({
@@ -7,63 +7,14 @@ const publicClient = createPublicClient({
   transport: http('https://mainnet.base.org')
 });
 
-// Base Token Adresleri
-const WETH = getAddress('0x4200000000000000000000000000000000000006');
-const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
-
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
-  ETH:   { address: WETH, decimals: 18 },
-  WETH:  { address: WETH, decimals: 18 },
-  USDC:  { address: USDC, decimals: 6 },
+  ETH:   { address: getAddress('0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'), decimals: 18 },
+  WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
+  USDC:  { address: getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'), decimals: 6 },
   CBETH: { address: getAddress('0x2Ae3F1Ec7F1F5012A327B6231F67a030B7B80498'), decimals: 18 },
   DAI:   { address: getAddress('0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb'), decimals: 18 },
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
-
-const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
-
-// ExactInput & ExactInputSingle Metodlarını İçeren ABI
-const SWAP_ROUTER_ABI = [
-  {
-    inputs: [
-      {
-        components: [
-          { name: 'tokenIn', type: 'address' },
-          { name: 'tokenOut', type: 'address' },
-          { name: 'fee', type: 'uint24' },
-          { name: 'recipient', type: 'address' },
-          { name: 'amountIn', type: 'uint256' },
-          { name: 'amountOutMinimum', type: 'uint256' },
-          { name: 'sqrtPriceLimitX96', type: 'uint160' }
-        ],
-        name: 'params',
-        type: 'tuple'
-      }
-    ],
-    name: 'exactInputSingle',
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
-    stateMutability: 'payable',
-    type: 'function'
-  },
-  {
-    inputs: [
-      {
-        components: [
-          { name: 'path', type: 'bytes' },
-          { name: 'recipient', type: 'address' },
-          { name: 'amountIn', type: 'uint256' },
-          { name: 'amountOutMinimum', type: 'uint256' }
-        ],
-        name: 'params',
-        type: 'tuple'
-      }
-    ],
-    name: 'exactInput',
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
-    stateMutability: 'payable',
-    type: 'function'
-  }
-] as const;
 
 const ERC20_ABI = [
   {
@@ -79,8 +30,7 @@ async function fetchLLMWithFallback(apiKey: string, prompt: string) {
   const models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
   const systemPrompt = `
     You are BaseIntent AI, an autonomous Web3 Intent Engine for Base Network (Chain ID: 8453).
-    Analyze user input and extract tokens & amounts.
-    Respond ONLY in raw JSON:
+    Analyze prompt and return strictly JSON:
     {
       "sellToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
       "buyToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
@@ -106,11 +56,11 @@ async function fetchLLMWithFallback(apiKey: string, prompt: string) {
       if (res.ok && data.choices && data.choices[0]?.message?.content) {
         return JSON.parse(data.choices[0].message.content);
       }
-    } catch (e) {
+    } catch {
       continue;
     }
   }
-  throw new Error("LLM Error");
+  throw new Error("LLM Hatası");
 }
 
 export async function POST(req: Request) {
@@ -118,14 +68,14 @@ export async function POST(req: Request) {
     const { prompt, userAddress } = await req.json();
     const apiKey = process.env.GROQ_API_KEY?.trim();
 
-    if (!apiKey) return NextResponse.json({ success: false, error: "API Key yok." }, { status: 500 });
+    if (!apiKey) return NextResponse.json({ success: false, error: "API Key eksik." }, { status: 500 });
 
     const parsedIntent = await fetchLLMWithFallback(apiKey, prompt);
     const sellToken = (parsedIntent.sellToken || 'ETH').toUpperCase();
-    const buyToken = (parsedIntent.buyToken || 'USDC').toUpperCase();
+    const buyToken = (parsedIntent.buyToken || 'CBETH').toUpperCase();
 
     const sellObj = BASE_TOKENS[sellToken] || BASE_TOKENS.ETH;
-    const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.USDC;
+    const buyObj = BASE_TOKENS[buyToken] || BASE_TOKENS.CBETH;
 
     let amountInWei: bigint;
     let finalAmountStr = String(parsedIntent.amount || '0.0001');
@@ -155,52 +105,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Yetersiz bakiye." }, { status: 400 });
     }
 
-    const recipientAddress = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : UNISWAP_ROUTER;
-    let swapCalldata: `0x${string}`;
+    // 0x API üzerinden en ideal likidite rotasının calldata'sını çekiyoruz
+    const queryParams = new URLSearchParams({
+      sellToken: sellObj.address,
+      buyToken: buyObj.address,
+      sellAmount: amountInWei.toString(),
+      takerAddress: userAddress && userAddress.startsWith('0x') ? userAddress : '0x0000000000000000000000000000000000000000'
+    });
 
-    // --- SWAP ROUTING LOGIC ---
-    if (sellToken === 'ETH' && buyToken === 'USDC') {
-      // Doğrudan WETH -> USDC %0.05 Pool (exactInputSingle)
-      swapCalldata = encodeFunctionData({
-        abi: SWAP_ROUTER_ABI,
-        functionName: 'exactInputSingle',
-        args: [{
-          tokenIn: sellObj.address,
-          tokenOut: buyObj.address,
-          fee: 500,
-          recipient: recipientAddress,
-          amountIn: amountInWei,
-          amountOutMinimum: BigInt(0),
-          sqrtPriceLimitX96: BigInt(0)
-        }]
-      });
-    } else {
-      // Direct pool olmayan tüm tokenler (cbETH, DAI, AERO) için USDC Multi-Hop Rotası
-      // Rota: [sellToken] -> (fee:500) -> [USDC] -> (fee:500) -> [buyToken]
-      const encodedPath = encodePacked(
-        ['address', 'uint24', 'address', 'uint24', 'address'],
-        [sellObj.address, 500, USDC, 500, buyObj.address]
-      );
+    const zeroExRes = await fetch(`https://base.api.0x.org/swap/v1/quote?${queryParams.toString()}`, {
+      headers: {
+        '0x-api-key': process.env.ZEROEX_API_KEY || '' // API key olmadan da rate-limit dahilinde çalışır
+      }
+    });
 
-      swapCalldata = encodeFunctionData({
-        abi: SWAP_ROUTER_ABI,
-        functionName: 'exactInput',
-        args: [{
-          path: encodedPath,
-          recipient: recipientAddress,
-          amountIn: amountInWei,
-          amountOutMinimum: BigInt(0)
-        }]
-      });
+    const quote = await zeroExRes.json();
+
+    if (!zeroExRes.ok) {
+      throw new Error(quote.reason || "0x API likidite rotası oluşturamadı.");
     }
 
     return NextResponse.json({
       success: true,
       data: {
         ...parsedIntent,
-        to: UNISWAP_ROUTER,
-        data: swapCalldata,
-        value: sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0',
+        to: getAddress(quote.to),
+        data: quote.data,
+        value: `0x${BigInt(quote.value || 0).toString(16)}`,
         sellToken,
         buyToken,
         amount: finalAmountStr,
@@ -208,15 +139,15 @@ export async function POST(req: Request) {
           {
             step: 1,
             action: `Swap ${finalAmountStr} ${sellToken} for ${buyToken}`,
-            targetContract: UNISWAP_ROUTER,
+            targetContract: quote.to,
             estimatedGasUsd: "$0.01",
-            details: { calldata: swapCalldata }
+            details: { calldata: quote.data }
           }
         ]
       }
     });
 
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message || "Routing Error" }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "İşlem rotası oluşturulamadı." }, { status: 500 });
   }
 }
