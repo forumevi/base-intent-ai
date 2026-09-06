@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 
-// Base Mainnet Adresleri (Hepsi getAddress süzgecinden geçirilmiştir)
+// Base Mainnet Adresleri (Büyük/Küçük harf Checksum düzenlendi)
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const USDC = getAddress('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
-const DEFAULT_KYBER_ROUTER = getAddress('0x6131b5fae19ea4f9d964eac09af83311a6337b5');
+const DEFAULT_KYBER_ROUTER = getAddress('0x6131B5fae19EA4f9D964eAc09af83311A6337b5');
 
 // ERC20 Approve ABI
 const ERC20_ABI = [
@@ -53,9 +53,8 @@ export async function POST(req: Request) {
       throw new Error('KyberSwap üzerinde rota bulunamadı.');
     }
 
-    // Dynamic veya Fallback Router Adresi - getAddress garantili
-    const rawRouter = routeData.data.routeSummary.routerAddress || DEFAULT_KYBER_ROUTER;
-    const routerAddress = getAddress(rawRouter);
+    const rawRouter = routeData.data.routeSummary.routerAddress;
+    const routerAddress = rawRouter ? getAddress(rawRouter) : DEFAULT_KYBER_ROUTER;
 
     // Calldata Paketleme (Build)
     const buildRes = await fetch(`https://aggregator-api.kyberswap.com/base/api/v1/route/build`, {
