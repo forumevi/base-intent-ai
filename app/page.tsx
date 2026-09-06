@@ -8,7 +8,7 @@ export default function Home() {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const { connect, connectors } = useConnect();
+  const { connect, connectors, error: connectError } = useConnect();
   const { disconnect } = useDisconnect();
   const { sendTransactionAsync } = useSendTransaction();
 
@@ -24,7 +24,7 @@ export default function Home() {
   const [agentLogs, setAgentLogs] = useState<string[]>([
     'AGENT_CORE_INIT: Base L2 Execution Layer Active',
     'AI_INTENT_PARSER: Llama-3.3-70B Neural Engine Online',
-    'SAFETY_GUARD: Multi-call Slippage Protection Active',
+    'SAFETY_GUARD: Direct Route Protection Active',
     'AWAITING_INPUT: Select preset or input plain English prompt...'
   ]);
 
@@ -40,12 +40,14 @@ export default function Home() {
     }
   }, [isConnected, isMainnet]);
 
+  // Esnek ve Güvenli Cüzdan Bağlama Fonksiyonu
   const handleConnect = () => {
-    const connector = connectors.find((c) => c.id === 'injected' || c.id === 'metaMask') || connectors[0];
-    if (connector) {
-      connect({ connector });
+    if (connectors.length > 0) {
+      // Önce injected veya ilk bulunan connector ile bağlan
+      const targetConnector = connectors.find((c) => c.id === 'injected') || connectors[0];
+      connect({ connector: targetConnector });
     } else {
-      alert('Lütfen MetaMask veya Rabby cüzdanınızın yüklü olduğunu kontrol edin.');
+      alert('Cüzdan eklentisi (MetaMask/Rabby) tespit edilemedi!');
     }
   };
 
@@ -269,7 +271,7 @@ export default function Home() {
             </button>
           </div>
 
-          {/* SAFE PRESET BUTTONS (POPÜLER TOKEN ÇİFTLERİ) */}
+          {/* SAFE PRESET BUTTONS */}
           <div className="space-y-2 pt-2">
             <div className="text-[11px] text-slate-400 font-bold tracking-wider">
               ⚡ POPULAR INTENT EXAMPLES (CLICK TO EXECUTE)
