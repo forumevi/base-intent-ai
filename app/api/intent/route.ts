@@ -16,15 +16,9 @@ const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> 
   AERO:  { address: getAddress('0x94b008aA00579c1307B0EF2c499aD98a8ce58e58'), decimals: 18 }
 };
 
-function getOptimalFeeTier(sellToken: string, buyToken: string): number {
-  const pair = `${sellToken}-${buyToken}`;
-  if (pair.includes('CBETH')) return 100;   // %0.01 Pool (cbETH/ETH ana likiditesi)
-  if (pair.includes('AERO')) return 3000;   // %0.30 Pool
-  if (pair.includes('DAI')) return 100;     // %0.01 Pool
-  return 500;                               // %0.05 Pool (USDC/ETH)
-}
-
+// Base Ağındaki V3 Router ve Quoter
 const UNISWAP_ROUTER = getAddress('0x2626664c2603336E57B271c5C0b26F421741e481');
+const UNISWAP_QUOTER = getAddress('0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a');
 
 const SWAP_ROUTER_ABI = [
   {
@@ -47,14 +41,21 @@ const SWAP_ROUTER_ABI = [
     outputs: [{ name: 'amountOut', type: 'uint256' }],
     stateMutability: 'payable',
     type: 'function'
-  },
+  }
+] as const;
+
+const QUOTER_ABI = [
   {
     inputs: [
-      { name: 'data', type: 'bytes[]' }
+      { name: 'tokenIn', type: 'address' },
+      { name: 'tokenOut', type: 'address' },
+      { name: 'fee', type: 'uint24' },
+      { name: 'amountIn', type: 'uint256' },
+      { name: 'sqrtPriceLimitX96', type: 'uint160' }
     ],
-    name: 'multicall',
-    outputs: [{ name: 'results', type: 'bytes[]' }],
-    stateMutability: 'payable',
+    name: 'quoteExactInputSingle',
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+    stateMutability: 'nonpayable',
     type: 'function'
   }
 ] as const;
@@ -68,6 +69,31 @@ const ERC20_ABI = [
     type: 'function'
   }
 ] as const;
+
+// Base üzerindeki aktif likidite havuzu fee katmanını dinamik bulan Quoter sistemi
+async function findBestFeeTier(tokenIn: `0x${string}`, tokenOut: `0x${string}`, amountIn: bigint): Promise<number> {
+  const possibleFees = [100, 500, 3000, 10000]; // %0.01, %0.05, %0.30, %1.00
+
+  for (const fee of possibleFees) {
+    try {
+      const result = await publicClient.readContract({
+        address: UNISWAP_QUOTER,
+        abi: QUOTER_ABI,
+        functionName: 'quoteExactInputSingle',
+        args: [tokenIn, tokenOut, fee, amountIn, BigInt(0)]
+      });
+
+      if (result && (result as bigint) > BigInt(0)) {
+        return fee; // Çalışan likidite havuzunu tespit etti
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  // Varsayılan havuz fallback'i
+  return 500;
+}
 
 async function fetchLLMWithFallback(apiKey: string, prompt: string) {
   const models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile'];
@@ -118,7 +144,7 @@ async function fetchLLMWithFallback(apiKey: string, prompt: string) {
     }
   }
 
-  throw new Error("Tüm LLM modelleri yanıt vermede başarısız oldu.");
+  throw new Error("LLM yanıt veremedi.");
 }
 
 export async function POST(req: Request) {
@@ -127,7 +153,7 @@ export async function POST(req: Request) {
     const apiKey = process.env.GROQ_API_KEY?.trim();
 
     if (!apiKey) {
-      return NextResponse.json({ success: false, error: "Groq API Key bulunamadı." }, { status: 500 });
+      return NextResponse.json({ success: false, error: "Groq API Key eksik." }, { status: 500 });
     }
 
     const parsedIntent = await fetchLLMWithFallback(apiKey, prompt);
@@ -165,20 +191,21 @@ export async function POST(req: Request) {
     }
 
     if (amountInWei <= BigInt(0)) {
-      return NextResponse.json({ success: false, error: `Cüzdanınızda yeterli ${sellToken} bakiyesi bulunamadı.` }, { status: 400 });
+      return NextResponse.json({ success: false, error: `Cüzdanda yeterli ${sellToken} bulunamadı.` }, { status: 400 });
     }
 
-    const feeTier = getOptimalFeeTier(sellToken, buyToken);
+    // Likidite havuzunu on-chain simüle ederek dinamik olarak çekiyoruz
+    const optimalFee = await findBestFeeTier(sellObj.address, buyObj.address, amountInWei);
+
     const recipientAddress = (userAddress && userAddress.startsWith('0x')) ? getAddress(userAddress) : UNISWAP_ROUTER;
 
-    // Uniswap V3 exactInputSingle Calldata
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
       args: [{
         tokenIn: sellObj.address,
         tokenOut: buyObj.address,
-        fee: feeTier,
+        fee: optimalFee,
         recipient: recipientAddress,
         amountIn: amountInWei,
         amountOutMinimum: BigInt(0),
@@ -212,6 +239,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("API Intent Error:", error);
-    return NextResponse.json({ success: false, error: error.message || "Intent işlenirken beklenmeyen bir hata oluştu." }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.message || "Hata oluştu." }, { status: 500 });
   }
 }
