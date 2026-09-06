@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 export default function Home() {
   const [prompt, setPrompt] = useState('');
@@ -32,15 +32,13 @@ export default function Home() {
     }
   };
 
-  const handleExecute = async (inputPrompt?: string) => {
-    const textToRun = inputPrompt || prompt;
-    if (!textToRun) return;
+  const handleExecute = async () => {
+    if (!prompt) return;
 
     setLoading(true);
-    addLog(`[INTENT_RECEIVE] "${textToRun}"`);
+    addLog(`[INTENT_RECEIVE] "${prompt}"`);
 
     try {
-      // 1. Cüzdan kontrolü
       let currentAddress = userAddress;
       if (!currentAddress && typeof window !== 'undefined' && (window as any).ethereum) {
         const accounts = await (window as any).ethereum.request({ method: 'eth_accounts' });
@@ -55,12 +53,11 @@ export default function Home() {
         }
       }
 
-      // 2. API'ye intent gönderme
       addLog('[PARSING] Evaluating Base Mainnet Liquidity Routes...');
       const res = await fetch('/api/intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: textToRun, userAddress: currentAddress })
+        body: JSON.stringify({ prompt, userAddress: currentAddress })
       });
 
       const result = await res.json();
@@ -73,7 +70,6 @@ export default function Home() {
       addLog(`[ROUTE_FOUND] ${txData.sellToken} ➔ ${txData.buyToken} via Uniswap V3`);
       addLog('[PROMPTING_WALLET] Please approve transaction in wallet...');
 
-      // 3. Web3 Transaction Tetikleme
       const txHash = await (window as any).ethereum.request({
         method: 'eth_sendTransaction',
         params: [{
@@ -187,7 +183,7 @@ export default function Home() {
               )}
               <button
                 type="button"
-                onClick={() => handleExecute()}
+                onClick={handleExecute}
                 disabled={loading || !prompt}
                 className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-mono text-xs font-bold px-5 py-2.5 rounded-lg transition-all shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer"
               >
@@ -196,16 +192,16 @@ export default function Home() {
             </div>
           </div>
 
-          {/* EXAMPLES */}
+          {/* EXAMPLES (SEÇİNCE SADECE METNİ DOLDURUR) */}
           <div className="space-y-2 pt-2">
             <div className="text-[11px] text-slate-400 font-bold font-mono tracking-wider">
-              ⚡ POPULAR INTENT EXAMPLES (CLICK TO EXECUTE)
+              ⚡ POPULAR INTENT EXAMPLES (CLICK TO FILL)
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs font-mono">
               <button
                 type="button"
-                onClick={() => { const p = 'Swap 0.0001 ETH for USDC'; setPrompt(p); handleExecute(p); }}
+                onClick={() => setPrompt('Swap 0.0001 ETH for USDC')}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-blue-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 0.0001 ETH ➔ <strong className="text-white">USDC</strong></span>
@@ -214,7 +210,7 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => { const p = 'Swap 0.0001 ETH for cbETH'; setPrompt(p); handleExecute(p); }}
+                onClick={() => setPrompt('Swap 0.0001 ETH for cbETH')}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-emerald-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 0.0001 ETH ➔ <strong className="text-white">cbETH</strong></span>
@@ -223,7 +219,7 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => { const p = 'Swap 0.0001 ETH for DAI'; setPrompt(p); handleExecute(p); }}
+                onClick={() => setPrompt('Swap 0.0001 ETH for DAI')}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-amber-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 0.0001 ETH ➔ <strong className="text-white">DAI</strong></span>
@@ -232,7 +228,7 @@ export default function Home() {
 
               <button
                 type="button"
-                onClick={() => { const p = 'Swap 0.0001 ETH for AERO'; setPrompt(p); handleExecute(p); }}
+                onClick={() => setPrompt('Swap 0.0001 ETH for AERO')}
                 className="p-3 rounded-xl bg-[#030611] border border-slate-800/80 hover:border-indigo-500/60 hover:bg-slate-900/60 text-left text-slate-300 transition-all flex items-center justify-between cursor-pointer"
               >
                 <span>🔄 0.0001 ETH ➔ <strong className="text-white">AERO</strong></span>
