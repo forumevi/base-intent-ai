@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { encodeFunctionData, parseEther, parseUnits, getAddress } from 'viem';
+import { encodeFunctionData, parseUnits, getAddress } from 'viem';
 
-// Base Mainnet Doğrulanmış Kontrat Listesi
 const BASE_TOKENS: Record<string, { address: `0x${string}`; decimals: number }> = {
   ETH:   { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
   WETH:  { address: getAddress('0x4200000000000000000000000000000000000006'), decimals: 18 },
@@ -37,23 +36,23 @@ const SWAP_ROUTER_ABI = [
   }
 ] as const;
 
-// LLM Parsleme Çağrısı (Groq Llama 3.3-70B Entegrasyonu)
 async function parseIntentWithLLM(prompt: string) {
   const apiKey = process.env.GROQ_API_KEY;
-  
+
   if (!apiKey) {
-    // Fallback if API key missing
-    return { sellToken: 'ETH', buyToken: 'USDC', amount: '0.0001' };
+    throw new Error('GROQ_API_KEY is missing in environment variables');
   }
 
-  const systemPrompt = `You are an AI DeFi Intent Parser for Base Mainnet. 
-Analyze the user query and output ONLY a raw JSON object (no markdown, no backticks) with 3 keys:
-- "sellToken": Symbol (ETH, USDC, CBETH, DAI, AERO)
-- "buyToken": Symbol (ETH, USDC, CBETH, DAI, AERO)
-- "amount": String representation of amount (e.g. "0.0001" or "1")
+  const systemPrompt = `You are a DeFi Intent Engine on Base Mainnet.
+Return ONLY a valid JSON object. No prose, no markdown fences.
+JSON schema:
+{
+  "sellToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
+  "buyToken": "ETH" | "USDC" | "CBETH" | "DAI" | "AERO",
+  "amount": "string number representation (e.g. 0.0001 or 1)"
+}
 
-Available tokens: ETH, USDC, CBETH, DAI, AERO.
-If user says "buy ETH with USDC", sellToken is USDC, buyToken is ETH.`;
+Example: "Buy ETH with USDC" -> {"sellToken": "USDC", "buyToken": "ETH", "amount": "1"}`;
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -67,16 +66,25 @@ If user says "buy ETH with USDC", sellToken is USDC, buyToken is ETH.`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.1,
-      response_format: { type: 'json_object' }
+      temperature: 0.1
     })
   });
 
   const data = await response.json();
-  const parsed = JSON.parse(data.choices[0].message.content);
+
+  if (!response.ok || !data.choices || !data.choices[0]) {
+    console.error('Groq API Error Response:', data);
+    throw new Error(data.error?.message || 'Invalid response from Groq LLM API');
+  }
+
+  const rawContent = data.choices[0].message.content.trim();
+  const cleanedJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
+  
+  const parsed = JSON.parse(cleanedJson);
+
   return {
-    sellToken: parsed.sellToken?.toUpperCase() || 'ETH',
-    buyToken: parsed.buyToken?.toUpperCase() || 'USDC',
+    sellToken: (parsed.sellToken || 'ETH').toUpperCase(),
+    buyToken: (parsed.buyToken || 'USDC').toUpperCase(),
     amount: String(parsed.amount || '0.0001')
   };
 }
@@ -89,7 +97,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Prompt is required' }, { status: 400 });
     }
 
-    // 1. LLM ile Intent Analizi Yapılıyor
     const intent = await parseIntentWithLLM(prompt);
 
     const sellObj = BASE_TOKENS[intent.sellToken] || BASE_TOKENS.ETH;
@@ -101,7 +108,6 @@ export async function POST(req: Request) {
       ? getAddress(userAddress) 
       : UNISWAP_ROUTER;
 
-    // 2. Uniswap V3 Calldata Hazırlığı
     const swapCalldata = encodeFunctionData({
       abi: SWAP_ROUTER_ABI,
       functionName: 'exactInputSingle',
@@ -116,24 +122,22 @@ export async function POST(req: Request) {
       }]
     });
 
-    const isNativeEth = intent.sellToken === 'ETH';
-
     return NextResponse.json({
       success: true,
       data: {
         to: UNISWAP_ROUTER,
         data: swapCalldata,
-        value: isNativeEth ? `0x${amountInWei.toString(16)}` : '0x0',
+        value: intent.sellToken === 'ETH' ? `0x${amountInWei.toString(16)}` : '0x0',
         sellToken: intent.sellToken,
         buyToken: intent.buyToken,
         amount: intent.amount,
         sellTokenAddress: sellObj.address,
-        amountInWei: amountInWei.toString(),
-        requiresApproval: !isNativeEth
+        amountInWei: amountInWei.toString()
       }
     });
 
   } catch (error: any) {
+    console.error('API Intent Error:', error);
     return NextResponse.json({ success: false, error: error.message || 'Error processing intent' }, { status: 500 });
   }
 }
