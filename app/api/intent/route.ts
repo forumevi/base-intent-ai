@@ -44,11 +44,9 @@ async function parseIntentWithLLM(prompt: string) {
   }
 
   const systemPrompt = `You are a DeFi Intent Engine on Base Mainnet.
-Analyze the user request and return ONLY a valid raw JSON object without markdown formatting, quotes or markdown blocks.
+Return ONLY a valid JSON object. No prose, no markdown formatting.
 JSON format:
-{"sellToken": "ETH", "buyToken": "USDC", "amount": "0.0001"}
-
-Tokens supported: ETH, USDC, CBETH, DAI, AERO.`;
+{"sellToken": "ETH", "buyToken": "USDC", "amount": "0.0001"}`;
 
   const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -57,7 +55,8 @@ Tokens supported: ETH, USDC, CBETH, DAI, AERO.`;
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-specdec',
+      model: 'llama-3.3-70b-versatile',
+      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
@@ -68,15 +67,12 @@ Tokens supported: ETH, USDC, CBETH, DAI, AERO.`;
 
   const data = await response.json();
 
-  if (!response.ok || !data.choices || !data.choices.length || !data.choices[0]?.message?.content) {
-    console.error('Groq API Error Response:', JSON.stringify(data));
-    throw new Error(data.error?.message || 'Invalid response from Groq LLM API');
+  if (!response.ok || !data.choices || !data.choices[0]?.message?.content) {
+    console.error('Groq Error:', data);
+    throw new Error(data.error?.message || 'Failed to parse intent');
   }
 
-  const rawContent = data.choices[0].message.content.trim();
-  const cleanedJson = rawContent.replace(/```json/g, '').replace(/```/g, '').trim();
-  
-  const parsed = JSON.parse(cleanedJson);
+  const parsed = JSON.parse(data.choices[0].message.content.trim());
 
   return {
     sellToken: (parsed.sellToken || 'ETH').toUpperCase(),
@@ -133,7 +129,7 @@ export async function POST(req: Request) {
     });
 
   } catch (error: any) {
-    console.error('API Intent Error:', error);
+    console.error('API Error:', error);
     return NextResponse.json({ success: false, error: error.message || 'Error processing intent' }, { status: 500 });
   }
 }
